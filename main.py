@@ -73,13 +73,30 @@ def send_stat(value):
     print("{}".format(convert_to_gbit(value)))
 
 
+def get_some_network_polling():
+    '''
+    TODOS
+    '''
+    print('i am going to fetch network polling here ')
+    pass
+
+
+def refresh_polling():
+    '''
+    TODOS
+    '''
+    print('then i am expected to do refresh polling interval straight ater')
+    pass
+
+
 def display_live_network_monitoring():
     '''
-    TODO ...
+    TODOS
     '''
     try:
         while True:
-            print('look.. i am running indefinitely')
+            get_some_network_polling()
+            refresh_polling()
             time.sleep(SLEEP_INTERVAL)
 
     except (KeyboardInterrupt, SystemExit):
