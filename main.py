@@ -30,7 +30,9 @@ def print_io_stats(io):
 
 
 def get_network_monitor_stats():
-
+    '''
+    Section to fetch all the network interfaces attached to this device
+    '''
     stats = psutil.net_if_stats()
 
     io_counters_tuple = psutil.net_io_counters(pernic=True)
@@ -44,8 +46,37 @@ def get_network_monitor_stats():
         print_io_stats(io)
 
 
+def get_simple_network_monitor():
+    '''
+    Section to get simple network monitor (which runs in indefinite state)
+    '''
+    old_value = 0
+    while True:
+        new_value = psutil.net_io_counters().bytes_sent + \
+            psutil.net_io_counters().bytes_recv
+
+        if old_value:
+            send_stat(new_value - old_value)
+
+        old_value = new_value
+        time.sleep(1)
+
+
+def convert_to_gbit(value):
+    return value/1024./1024./1024.*8
+
+
+def send_stat(value):
+    print("{}".format(convert_to_gbit(value)))
+
+
 def main():
+    # use this
     get_network_monitor_stats()
 
+    # or this
+    # get_simple_network_monitor()
 
-main()
+
+if __name__ == "__main__":
+    main()
