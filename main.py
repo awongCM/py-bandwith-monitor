@@ -10,6 +10,9 @@ duplex_map = {
     psutil.NIC_DUPLEX_UNKNOWN: "?",
 }
 
+# Constants go here
+SLEEP_INTERVAL = 1
+
 
 def print_nic_info(nic):
     print("    stats       : ", end='')
@@ -70,12 +73,29 @@ def send_stat(value):
     print("{}".format(convert_to_gbit(value)))
 
 
+def display_live_network_monitoring():
+    '''
+    TODO ...
+    '''
+    try:
+        while True:
+            print('look.. i am running indefinitely')
+            time.sleep(SLEEP_INTERVAL)
+
+    except (KeyboardInterrupt, SystemExit):
+        print('until a certain someone or something killed it...')
+        pass
+
+
 def main():
     # use this
     get_network_monitor_stats()
 
     # or this
     # get_simple_network_monitor()
+
+    # or even better
+    display_live_network_monitoring()
 
 
 if __name__ == "__main__":
