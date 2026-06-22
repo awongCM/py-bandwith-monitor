@@ -1,4 +1,4 @@
-"""Backward-compatible entry point for the bandwidth monitor."""
+"""Allow `python -m monitor` as an entry point."""
 
 from monitor.cli import main
 
