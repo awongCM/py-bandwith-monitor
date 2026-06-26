@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 from typing import Sequence
 
@@ -57,6 +58,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print structured JSON output.",
+    )
+    watch_parser.add_argument(
+        "--duration",
+        type=float,
+        metavar="SECONDS",
+        help="Stop automatically after this many seconds.",
+    )
+    watch_parser.add_argument(
+        "--samples",
+        type=int,
+        metavar="N",
+        help="Stop automatically after N samples.",
     )
     _add_interface_filters(watch_parser)
 
@@ -151,18 +164,51 @@ def run_watch(args: argparse.Namespace) -> int:
         include=include,
         exclude=exclude,
     )
+    stop_requested = False
+    finished_by_limit = False
+
+    def request_stop(_signum: int, _frame: object | None) -> None:
+        nonlocal stop_requested
+        stop_requested = True
+
+    previous_sigint = signal.getsignal(signal.SIGINT)
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
+
+    if sys.stderr.isatty() and not args.json:
+        print(
+            "Watching bandwidth. Press Ctrl+C to stop "
+            "(use --duration or --samples in cloud terminals).",
+            file=sys.stderr,
+            flush=True,
+        )
 
     try:
-        for sample in collector.watch():
+        for sample in collector.watch(
+            max_samples=args.samples,
+            duration=args.duration,
+            stop_check=lambda: stop_requested,
+        ):
+            if stop_requested:
+                break
             if args.json:
                 print(json.dumps(sample.to_dict()), flush=True)
             else:
                 print_watch_sample(sample)
+        else:
+            finished_by_limit = bool(args.duration is not None or args.samples is not None)
     except KeyboardInterrupt:
-        if not args.json:
-            print("\nStopped.")
-        return 0
+        stop_requested = True
+    finally:
+        signal.signal(signal.SIGINT, previous_sigint)
+        signal.signal(signal.SIGTERM, previous_sigterm)
 
+    if not args.json:
+        if stop_requested:
+            print("\nStopped.", flush=True)
+        elif finished_by_limit:
+            print("\nFinished.", flush=True)
     return 0
 
 

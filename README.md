@@ -66,10 +66,31 @@ python -m monitor watch --json
 
 ```bash
 python -m monitor watch --interval 2 --history-size 1800
+python -m monitor watch --duration 30
+python -m monitor watch --samples 10
 ```
 
 `watch` keeps recent samples in an in-memory ring buffer. The default history
 size is 3600 samples, which is about one hour at a 1 second interval.
+
+### Stopping `watch`
+
+On a normal terminal, press **Ctrl+C** (not Cmd+C on Mac) to stop.
+
+Cloud agent and web terminals often do not forward keyboard interrupts reliably.
+Use one of these instead:
+
+```bash
+# Auto-stop after 30 seconds or 10 samples
+python -m monitor watch --duration 30
+python -m monitor watch --samples 10
+
+# Stop a background tmux session
+tmux -f /exec-daemon/tmux.portal.conf kill-session -t bandwidth-watch
+
+# Stop any running watch process from another shell
+pkill -f "monitor watch"
+```
 
 ## Commands
 

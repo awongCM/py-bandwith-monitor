@@ -111,6 +111,47 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(len(collector.store), 1)
         self.assertEqual(sample.interfaces[0].name, "eth0")
 
+    @patch("monitor.collector.psutil.net_io_counters")
+    @patch("monitor.collector.psutil.net_if_stats")
+    def test_watch_stops_after_sample_limit(self, mock_stats, mock_counters) -> None:
+        mock_stats.return_value = {
+            "eth0": type(
+                "Stats",
+                (),
+                {
+                    "isup": True,
+                    "speed": 1000,
+                    "duplex": psutil.NIC_DUPLEX_FULL,
+                    "mtu": 1500,
+                },
+            )()
+        }
+        counter = type(
+            "Counters",
+            (),
+            {
+                "bytes_recv": 100,
+                "bytes_sent": 200,
+                "packets_recv": 1,
+                "packets_sent": 2,
+                "errin": 0,
+                "errout": 0,
+                "dropin": 0,
+                "dropout": 0,
+            },
+        )
+
+        def next_counter() -> dict[str, object]:
+            counter.bytes_recv += 100
+            counter.bytes_sent += 100
+            return {"eth0": counter}
+
+        mock_counters.side_effect = lambda **kwargs: next_counter()
+
+        collector = BandwidthCollector(interval=0.01, history_size=5, include=("eth0",))
+        samples = list(collector.watch(max_samples=3))
+        self.assertEqual(len(samples), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

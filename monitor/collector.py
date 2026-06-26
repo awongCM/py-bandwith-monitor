@@ -6,7 +6,7 @@ import fnmatch
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Iterable, Iterator
+from typing import Callable, Deque, Iterable, Iterator
 
 import psutil
 
@@ -237,13 +237,46 @@ class BandwidthCollector:
             self.store.add(aggregate)
         return aggregate
 
-    def watch(self) -> Iterator[AggregateRates]:
-        """Yield transfer-rate samples forever at the configured interval."""
+    def _wait(self, stop_check: Callable[[], bool] | None = None) -> None:
+        """Sleep for one interval, checking for stop requests every 0.1s."""
+        deadline = time.monotonic() + self.interval
+        while True:
+            if stop_check and stop_check():
+                return
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+
+            time.sleep(min(0.1, remaining))
+
+    def watch(
+        self,
+        *,
+        max_samples: int | None = None,
+        duration: float | None = None,
+        stop_check: Callable[[], bool] | None = None,
+    ) -> Iterator[AggregateRates]:
+        """Yield transfer-rate samples until stopped or a limit is reached."""
+        started = time.monotonic()
+        emitted = 0
+
         self.prime()
-        time.sleep(self.interval)
+        self._wait(stop_check)
+        if stop_check and stop_check():
+            return
 
         while True:
+            if stop_check and stop_check():
+                return
+            if duration is not None and time.monotonic() - started >= duration:
+                return
+
             aggregate = self.sample_once()
             if aggregate is not None:
                 yield aggregate
-            time.sleep(self.interval)
+                emitted += 1
+                if max_samples is not None and emitted >= max_samples:
+                    return
+
+            self._wait(stop_check)
