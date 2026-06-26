@@ -73,6 +73,46 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_interface_filters(watch_parser)
 
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start the web dashboard and background sampler.",
+    )
+    serve_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind (default: 127.0.0.1).",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Port to bind (default: 8080).",
+    )
+    serve_parser.add_argument(
+        "--db",
+        default="monitor.db",
+        help="SQLite database path (default: monitor.db).",
+    )
+    serve_parser.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Seconds between background samples (default: 1.0).",
+    )
+    serve_parser.add_argument(
+        "--history-size",
+        type=int,
+        default=3600,
+        help="In-memory ring buffer size for the collector (default: 3600).",
+    )
+    serve_parser.add_argument(
+        "--retention-days",
+        type=int,
+        default=7,
+        help="Days of SQLite history to retain (default: 7).",
+    )
+    _add_interface_filters(serve_parser)
+
     return parser
 
 
@@ -212,6 +252,24 @@ def run_watch(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from monitor.server import create_app
+
+    include, exclude = _interface_filters(args)
+    app = create_app(
+        db_path=args.db,
+        interval=args.interval,
+        history_size=args.history_size,
+        include=include,
+        exclude=exclude,
+        retention_days=args.retention_days,
+    )
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -220,6 +278,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_snapshot(args)
     if args.command == "watch":
         return run_watch(args)
+    if args.command == "serve":
+        return run_serve(args)
 
     parser.error(f"Unknown command: {args.command}")
     return 2
