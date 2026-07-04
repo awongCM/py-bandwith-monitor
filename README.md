@@ -6,10 +6,15 @@ This tool reads kernel network counters on the machine where it runs using
 `psutil`. It is useful for checking interface status, cumulative traffic, and
 live upload/download rates per network interface.
 
+Phase 2 adds a web dashboard with SQLite history, REST APIs, and WebSocket live
+updates.
+
 ## Requirements
 
 - Python 3.10+
 - `psutil`
+- `fastapi`
+- `uvicorn`
 
 ## Install
 
@@ -25,17 +30,42 @@ Take a one-shot snapshot of monitored interfaces:
 python -m monitor snapshot
 ```
 
-Watch live upload and download rates:
+Watch live upload and download rates in the terminal:
 
 ```bash
 python -m monitor watch
 ```
+
+Start the web dashboard:
+
+```bash
+python -m monitor serve
+```
+
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080) in your browser.
 
 The legacy entry point still works:
 
 ```bash
 python main.py snapshot
 python main.py watch
+python main.py serve
+```
+
+### Dashboard
+
+The dashboard includes:
+
+- **Live overview** — total upload/download speeds with sparklines
+- **Per interface** — interface selector and 5 / 15 / 60 minute charts
+- **Interface table** — link status, cumulative totals, errors, and drops
+- **Health panel** — link up/down events and rising error/drop alerts
+
+Sample data is stored locally in SQLite (`monitor.db` by default) and retained
+for 7 days.
+
+```bash
+python -m monitor serve --host 0.0.0.0 --port 8080 --db monitor.db --interval 1
 ```
 
 ### Interface filters
@@ -47,6 +77,7 @@ Monitor only specific interfaces:
 
 ```bash
 python -m monitor watch --include eth0 --include wlan0
+python -m monitor serve --include eth0 --include wlan0
 ```
 
 Exclude additional interfaces:
@@ -81,15 +112,11 @@ Cloud agent and web terminals often do not forward keyboard interrupts reliably.
 Use one of these instead:
 
 ```bash
-# Auto-stop after 30 seconds or 10 samples
 python -m monitor watch --duration 30
 python -m monitor watch --samples 10
-
-# Stop a background tmux session
 tmux -f /exec-daemon/tmux.portal.conf kill-session -t bandwidth-watch
-
-# Stop any running watch process from another shell
 pkill -f "monitor watch"
+pkill -f "monitor serve"
 ```
 
 ## Commands
@@ -98,11 +125,24 @@ pkill -f "monitor watch"
 |---------|-------------|
 | `snapshot` | Print interface link status and cumulative byte/packet counters |
 | `watch` | Print live per-interface upload/download rates every interval |
+| `serve` | Start the FastAPI dashboard and background sampler |
 
-## Next steps
+## API
 
-- Phase 2: web dashboard with FastAPI and historical charts
-- Optional: router or multi-host monitoring for LAN-wide visibility
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/overview?minutes=5` | Latest totals plus aggregate history |
+| `GET /api/history?interface=eth0&minutes=15` | Per-interface rate history |
+| `GET /api/interfaces` | Latest interface snapshots and rates |
+| `GET /api/health?limit=50` | Recent health events |
+| `WS /ws/live` | Live sample stream for the dashboard |
+
+## Development with worktrees
+
+Phase 2 was split across git worktrees:
+
+- `cursor/phase2-storage-api-3189` — SQLite, health checks, FastAPI server
+- `cursor/phase2-frontend-3189` — Chart.js dashboard UI
 
 ## License
 

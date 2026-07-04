@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+AGGREGATE_INTERFACE = "__total__"
+
 
 @dataclass(frozen=True)
 class InterfaceStats:
@@ -58,3 +60,16 @@ class AggregateRates:
         data = asdict(self)
         data["interfaces"] = [item.to_dict() for item in self.interfaces]
         return data
+
+
+@dataclass(frozen=True)
+class HealthEvent:
+    timestamp: float
+    interface: str
+    event_type: str
+    severity: str
+    message: str
+    value: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

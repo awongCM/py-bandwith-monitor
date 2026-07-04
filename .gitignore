@@ -102,3 +102,10 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# Local monitor database
+monitor.db
+*.db-journal
+
+# Git worktrees used for parallel development
+worktrees/
