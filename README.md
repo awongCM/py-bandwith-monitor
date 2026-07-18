@@ -217,7 +217,7 @@ multi-host agents, or LAN-wide per-device traffic.
 |-------|--------|---------|
 | **Phase 1** | Done | Collector refactor, CLI (`snapshot`, `watch`), per-interface rates |
 | **Phase 2** | Done | SQLite storage, FastAPI server, Chart.js dashboard |
-| **Phase 3** | Planned | Alerts, rollups, deployment, polish |
+| **Phase 3** | In progress | Deployment + integration tests done; alerts, rollups, config planned |
 | **Phase 4** | Planned | Home LAN / multi-device monitoring (router APIs, agents) |
 
 ---
@@ -354,36 +354,138 @@ git worktree add -b cursor/phase3-ui-3189 ../worktrees/phase3-ui master
 
 ---
 
-### Phase 3 — Alerts, rollups, and deployment (planned)
+### Phase 3 — Alerts, rollups, and deployment (in progress)
 
 **Goal:** Production-ready home monitoring on an always-on machine (Mac,
 Raspberry Pi, NAS).
 
-**Planned deliverables**
+**Deliverable status**
 
-| Area | Feature |
-|------|---------|
-| **Alerts** | Threshold alerts (e.g. > 100 Mbps, sustained high errors) |
-| **Notifications** | Email, webhook, or desktop notification hooks |
-| **Retention** | 7 days of 1s samples; 30 days of 1-minute averages (hourly/daily rollups) |
-| **Deployment** | systemd service, Docker container, or Render worker with persistent disk/DB |
-| **Polish** | Better virtual-interface filtering, startup config file, pinned dependency lockfile |
-| **Testing** | Integration tests for API + sampler; mocked `psutil` fixtures |
+| Area | Status | Notes |
+|------|--------|-------|
+| **Deployment** | Done | `Dockerfile`, `docker-compose.yml`, `deploy/systemd/bandwidth-monitor.service` |
+| **Testing** | Done | `tests/test_integration.py` — API + sampler with mocked `psutil` |
+| **Alerts** | Planned | Threshold alerts (e.g. > 100 Mbps, sustained high errors) |
+| **Notifications** | Planned | Email, webhook, or desktop notification hooks |
+| **Retention rollups** | Planned | 7 days of 1s samples; 30 days of 1-minute averages |
+| **Config file** | Planned | YAML/JSON for interfaces, intervals, thresholds |
+| **Polish** | Planned | Better virtual-interface filtering, pinned dependency lockfile |
 
-**Suggested build order**
+**Suggested build order (remaining work)**
 
 1. Config file (YAML/JSON) for interfaces, intervals, thresholds
 2. Hourly/daily rollup job (SQLite aggregation or cron)
 3. Alert engine evaluating thresholds against live + historical data
 4. Notification adapters (webhook first, then email/desktop)
-5. Docker + systemd unit files
-6. README deploy guide for home server / Raspberry Pi
 
 **Open questions for Phase 3**
 
 - Where will it run? Same machine as browser, or dedicated always-on host?
 - Which notification channel matters most? (Telegram/Slack webhook, email, macOS notification)
 - Should the dashboard be LAN-accessible only or exposed via reverse proxy?
+
+---
+
+## Deployment (home server / Raspberry Pi)
+
+Run the dashboard on an always-on host so history survives reboots and you can
+open the UI from any device on your LAN.
+
+**Data persistence:** SQLite lives at the path passed to `--db` (default
+`monitor.db`). Mount a volume or dedicated directory — the database is lost if
+the container filesystem is ephemeral.
+
+**LAN access:** bind to `0.0.0.0` (Docker and systemd examples below do this).
+Open `http://<host-ip>:8080` from another machine on the network. Do not expose
+port 8080 to the public internet without a reverse proxy and authentication.
+
+### Docker (recommended for Pi / NAS)
+
+Build and run with a named volume for the database:
+
+```bash
+docker build -t bandwidth-monitor .
+docker run -d \
+  --name bandwidth-monitor \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v bandwidth-monitor-data:/data \
+  bandwidth-monitor
+```
+
+Or use Compose:
+
+```bash
+docker compose up -d --build
+```
+
+Monitor a specific interface (Raspberry Pi `eth0`, Mac `en0`, etc.):
+
+```bash
+docker run -d \
+  --name bandwidth-monitor \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v bandwidth-monitor-data:/data \
+  bandwidth-monitor \
+  python -m monitor serve --host 0.0.0.0 --port 8080 --db /data/monitor.db --include eth0
+```
+
+The image runs as a non-root `monitor` user and stores data under `/data`.
+
+### systemd (bare metal / venv install)
+
+1. Clone the repo and create a virtual environment:
+
+```bash
+sudo mkdir -p /opt/bandwidth-monitor /var/lib/bandwidth-monitor
+sudo git clone https://github.com/andywongcheeming/py-bandwith-monitor.git /opt/bandwidth-monitor
+cd /opt/bandwidth-monitor
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+sudo useradd --system --home /opt/bandwidth-monitor --shell /usr/sbin/nologin monitor || true
+sudo chown -R monitor:monitor /opt/bandwidth-monitor /var/lib/bandwidth-monitor
+```
+
+2. Install the unit file and start the service:
+
+```bash
+sudo cp deploy/systemd/bandwidth-monitor.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now bandwidth-monitor.service
+sudo systemctl status bandwidth-monitor.service
+```
+
+3. Optional: edit `ExecStart` in the unit to add `--include eth0` (or `en0` on
+   Mac) and adjust `--retention-days` as needed.
+
+Logs: `journalctl -u bandwidth-monitor.service -f`
+
+### Always-on Mac
+
+Use Docker as above, or run under `launchd` with the same `python -m monitor serve`
+command. For a quick LAN-visible instance without Docker:
+
+```bash
+python -m monitor serve --host 0.0.0.0 --port 8080 --db ~/bandwidth-monitor/monitor.db
+```
+
+Keep the Mac awake (Energy Saver → prevent sleep when display is off, or use
+`caffeinate` in a `tmux`/`screen` session).
+
+### Render (optional cloud host)
+
+If you deploy to [Render](https://render.com), bind to `0.0.0.0:$PORT` and
+attach a persistent disk for SQLite — Render's filesystem is ephemeral without
+one. Example start command:
+
+```bash
+python -m monitor serve --host 0.0.0.0 --port $PORT --db /data/monitor.db
+```
+
+Future Phase 3 config may expose env vars such as `MONITOR_DB`, `MONITOR_INCLUDE`,
+and `MONITOR_INTERVAL`; until then, pass flags via Docker `command` or systemd
+`ExecStart`.
 
 ---
 
@@ -434,9 +536,15 @@ monitor/
     app.js         # Chart.js + WebSocket client
     styles.css     # dashboard styles
 tests/
-  test_monitor.py  # Phase 1 tests
-  test_storage.py  # SQLite + health tests
-  test_server.py   # API endpoint tests
+  test_monitor.py      # Phase 1 tests
+  test_storage.py      # SQLite + health tests
+  test_server.py       # API endpoint tests
+  test_integration.py  # sampler + API integration (mocked psutil)
+deploy/
+  systemd/
+    bandwidth-monitor.service
+Dockerfile
+docker-compose.yml
 main.py            # legacy entry point
 config.example.yaml
 requirements.txt
