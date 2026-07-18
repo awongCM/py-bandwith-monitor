@@ -10,6 +10,7 @@ from typing import Sequence
 
 from monitor import __version__
 from monitor.collector import BandwidthCollector, list_interface_stats
+from monitor.config import AppConfig, load_config
 from monitor.formatting import bytes2human, rate2human
 from monitor.models import AggregateRates, InterfaceStats
 
@@ -18,6 +19,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="monitor",
         description="Monitor local network interface bandwidth.",
+    )
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help="YAML config file (default: config.yaml in the current directory).",
     )
     parser.add_argument(
         "--version",
@@ -137,6 +143,33 @@ def _interface_filters(args: argparse.Namespace) -> tuple[tuple[str, ...], tuple
     include = tuple(args.include)
     exclude = tuple(args.exclude)
     return include, exclude
+
+
+def apply_config_defaults(args: argparse.Namespace, config: AppConfig) -> None:
+    """Fill unset CLI values from *config* (CLI flags always win)."""
+    if not args.include:
+        args.include = list(config.interfaces.include)
+    if not args.exclude:
+        args.exclude = list(config.interfaces.exclude)
+
+    if args.command == "watch":
+        if args.interval == 1.0:
+            args.interval = config.sampling.interval
+        if args.history_size == 3600:
+            args.history_size = config.sampling.history_size
+    elif args.command == "serve":
+        if args.host == "127.0.0.1":
+            args.host = config.server.host
+        if args.port == 8080:
+            args.port = config.server.port
+        if args.db == "monitor.db":
+            args.db = config.server.db
+        if args.interval == 1.0:
+            args.interval = config.sampling.interval
+        if args.history_size == 3600:
+            args.history_size = config.sampling.history_size
+        if args.retention_days == 7:
+            args.retention_days = config.retention.days
 
 
 def print_snapshot(interfaces: Sequence[InterfaceStats]) -> None:
@@ -273,6 +306,9 @@ def run_serve(args: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    config = load_config(args.config)
+    apply_config_defaults(args, config)
+    args.app_config = config
 
     if args.command == "snapshot":
         return run_snapshot(args)
