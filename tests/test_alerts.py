@@ -99,7 +99,12 @@ class AlertEngineTests(unittest.TestCase):
         )
         engine = AlertEngine(settings, interval=1.0, clock=lambda: 100.0)
 
-        def history_getter(_interface: str, _minutes: float) -> list[dict[str, float]]:
+        def history_getter(
+            _interface: str,
+            *,
+            minutes: float,
+        ) -> list[dict[str, float]]:
+            self.assertGreater(minutes, 0)
             return [
                 {"recv_bps": 60_000_000, "sent_bps": 60_000_000},
                 {"recv_bps": 60_000_000, "sent_bps": 60_000_000},

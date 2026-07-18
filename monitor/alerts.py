@@ -16,7 +16,8 @@ from monitor.models import (
 )
 
 
-HistoryGetter = Callable[[str, float], list[dict[str, Any]]]
+# Accept positional or keyword `minutes` so storage's keyword-only API works.
+HistoryGetter = Callable[..., list[dict[str, Any]]]
 Clock = Callable[[], float]
 
 HEALTH_ALERT_TYPES = frozenset({"high_errors", "high_drops", "link_down"})
@@ -118,7 +119,7 @@ class AlertEngine:
     ) -> None:
         # Seed streaks from history only; the current sample is applied next.
         minutes = self.settings.bandwidth_sustained_seconds / 60.0
-        history = history_getter(AGGREGATE_INTERFACE, minutes)
+        history = history_getter(AGGREGATE_INTERFACE, minutes=minutes)
 
         for rule_key, alert_type, threshold_bps in self._rate_rules():
             streak = 0

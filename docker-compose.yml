@@ -1,8 +1,9 @@
 services:
   bandwidth-monitor:
     build: .
-    ports:
-      - "8080:8080"
+    # Host networking so psutil sees real NICs (Linux). On Docker Desktop
+    # (macOS/Windows), prefer a host venv/systemd/launchd install instead.
+    network_mode: host
     volumes:
       - monitor-data:/data
       # Copy config.example.yaml → ./config.yaml and edit before first start.

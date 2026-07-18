@@ -94,7 +94,7 @@ The dashboard includes:
 - **Per interface** — interface selector and 5 / 15 / 60 minute charts
 - **Interface table** — link status, cumulative totals, errors, and drops
 - **Health panel** — link up/down events and rising error/drop alerts
-- **Alerts panel** — threshold breaches with optional webhook delivery
+- **Alert status** — header indicator for armed thresholds; recent alerts via `/api/alerts`
 
 Sample data is stored locally in SQLite (`monitor.db` by default). Raw 1s
 samples are retained for 7 days by default; minute/hourly/daily rollups keep
@@ -372,7 +372,7 @@ Raspberry Pi, NAS).
 | **Polish** | Done | Virtual-interface filtering improvements, `requirements.lock` |
 | **Retention rollups** | Done | Minute/hourly/daily tables + scheduled maintenance |
 | **Alerts** | Done | Threshold engine (`monitor/alerts.py`) + dashboard alerts panel |
-| **Notifications** | Done | Webhook notifier (`ALERT_WEBHOOK_URL` / `notifications.webhook_url`) |
+| **Notifications** | Done (webhook) | Webhook notifier; email/desktop stubs reserved for later |
 | **Deployment** | Done | `Dockerfile`, `docker-compose.yml`, `deploy/systemd/bandwidth-monitor.service` |
 | **Testing** | Done | Config, retention, alerts, and `tests/test_integration.py` |
 
@@ -407,7 +407,12 @@ CLI flags that override `server.host`). Open `http://<host-ip>:8080` from
 another machine on the network. Do not expose port 8080 to the public internet
 without a reverse proxy and authentication.
 
-### Docker (recommended for Pi / NAS)
+### Docker (Linux host networking recommended for real NICs)
+
+Bridge networking shows **container** interfaces to `psutil`, not the host’s
+`eth0`/`wlan0`. On Linux, use host networking (or prefer systemd below) so the
+monitor sees the same NICs as the host. On macOS/Windows Docker, host network
+mode is limited — run via venv/systemd/`launchd` on the host instead.
 
 ```bash
 cp config.example.yaml config.yaml
@@ -417,13 +422,14 @@ docker build -t bandwidth-monitor .
 docker run -d \
   --name bandwidth-monitor \
   --restart unless-stopped \
-  -p 8080:8080 \
+  --network host \
   -v bandwidth-monitor-data:/data \
   -v "$(pwd)/config.yaml:/data/config.yaml:ro" \
   bandwidth-monitor
 ```
 
-Or use Compose (expects `./config.yaml` beside `docker-compose.yml`):
+Or use Compose (expects `./config.yaml` beside `docker-compose.yml`; default
+compose file uses `network_mode: host` on Linux):
 
 ```bash
 cp config.example.yaml config.yaml
@@ -433,7 +439,8 @@ docker compose up -d --build
 The image runs as a non-root `monitor` user, installs from `requirements.lock`
 when present (else `requirements.txt`), and defaults to
 `--config /data/config.yaml --host 0.0.0.0 --port 8080 --db /data/monitor.db`.
-A missing config file falls back to built-in defaults.
+A missing config file falls back to built-in defaults. With `--network host`,
+port publish (`-p`) is unnecessary — open `http://<host-ip>:8080` directly.
 
 Optional webhook override without editing YAML:
 

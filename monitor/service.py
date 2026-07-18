@@ -95,6 +95,9 @@ class SamplingService:
                 break
             self._handle_sample(sample)
 
+    def _rate_history(self, interface: str, *, minutes: float) -> list[dict[str, Any]]:
+        return self.database.get_rate_history(interface, minutes=minutes)
+
     def _handle_sample(self, sample: AggregateRates) -> None:
         interfaces = list_interface_stats(
             include=self.include or None,
@@ -113,7 +116,7 @@ class SamplingService:
                 sample,
                 interfaces,
                 events,
-                history_getter=self.database.get_rate_history,
+                history_getter=self._rate_history,
             )
             for alert in alerts:
                 self.database.insert_alert_event(alert)
@@ -121,8 +124,14 @@ class SamplingService:
 
         self._samples_since_maintenance += 1
         if self._samples_since_maintenance >= self.retention.maintenance_interval_samples:
-            self.database.run_retention_maintenance(self.retention)
             self._samples_since_maintenance = 0
+            # Run off the sampler thread; MetricsDatabase serializes via its lock.
+            threading.Thread(
+                target=self.database.run_retention_maintenance,
+                args=(self.retention,),
+                name="retention-maintenance",
+                daemon=True,
+            ).start()
 
         if self.on_sample is not None:
             payload = {

@@ -51,14 +51,14 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser.add_argument(
         "--interval",
         type=float,
-        default=1.0,
-        help="Seconds between samples (default: 1.0).",
+        default=None,
+        help="Seconds between samples (default: 1.0, or sampling.interval from config).",
     )
     watch_parser.add_argument(
         "--history-size",
         type=int,
-        default=3600,
-        help="Number of in-memory samples to retain (default: 3600).",
+        default=None,
+        help="Number of in-memory samples to retain (default: 3600, or config).",
     )
     watch_parser.add_argument(
         "--json",
@@ -85,37 +85,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve_parser.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="Host to bind (default: 127.0.0.1).",
+        default=None,
+        help="Host to bind (default: 127.0.0.1, or server.host from config).",
     )
     serve_parser.add_argument(
         "--port",
         type=int,
-        default=8080,
-        help="Port to bind (default: 8080).",
+        default=None,
+        help="Port to bind (default: 8080, or server.port from config).",
     )
     serve_parser.add_argument(
         "--db",
-        default="monitor.db",
-        help="SQLite database path (default: monitor.db).",
+        default=None,
+        help="SQLite database path (default: monitor.db, or server.db from config).",
     )
     serve_parser.add_argument(
         "--interval",
         type=float,
-        default=1.0,
-        help="Seconds between background samples (default: 1.0).",
+        default=None,
+        help="Seconds between background samples (default: 1.0, or config).",
     )
     serve_parser.add_argument(
         "--history-size",
         type=int,
-        default=3600,
-        help="In-memory ring buffer size for the collector (default: 3600).",
+        default=None,
+        help="In-memory ring buffer size for the collector (default: 3600, or config).",
     )
     serve_parser.add_argument(
         "--retention-days",
         type=int,
-        default=7,
-        help="Days of SQLite history to retain (default: 7).",
+        default=None,
+        help="Days of raw SQLite samples to retain (default: 7, or retention.days).",
     )
     _add_interface_filters(serve_parser)
 
@@ -146,30 +146,46 @@ def _interface_filters(args: argparse.Namespace) -> tuple[tuple[str, ...], tuple
 
 
 def apply_config_defaults(args: argparse.Namespace, config: AppConfig) -> None:
-    """Fill unset CLI values from *config* (CLI flags always win)."""
+    """Fill unset CLI values from *config*, then built-in defaults (CLI wins)."""
     if not args.include:
         args.include = list(config.interfaces.include)
     if not args.exclude:
         args.exclude = list(config.interfaces.exclude)
 
     if args.command == "watch":
-        if args.interval == 1.0:
+        if args.interval is None:
             args.interval = config.sampling.interval
-        if args.history_size == 3600:
+        if args.history_size is None:
             args.history_size = config.sampling.history_size
+        if args.interval is None:
+            args.interval = 1.0
+        if args.history_size is None:
+            args.history_size = 3600
     elif args.command == "serve":
-        if args.host == "127.0.0.1":
+        if args.host is None:
             args.host = config.server.host
-        if args.port == 8080:
+        if args.port is None:
             args.port = config.server.port
-        if args.db == "monitor.db":
+        if args.db is None:
             args.db = config.server.db
-        if args.interval == 1.0:
+        if args.interval is None:
             args.interval = config.sampling.interval
-        if args.history_size == 3600:
+        if args.history_size is None:
             args.history_size = config.sampling.history_size
-        if args.retention_days == 7:
+        if args.retention_days is None:
             args.retention_days = config.retention.days
+        if args.host is None:
+            args.host = "127.0.0.1"
+        if args.port is None:
+            args.port = 8080
+        if args.db is None:
+            args.db = "monitor.db"
+        if args.interval is None:
+            args.interval = 1.0
+        if args.history_size is None:
+            args.history_size = 3600
+        if args.retention_days is None:
+            args.retention_days = 7
 
 
 def print_snapshot(interfaces: Sequence[InterfaceStats]) -> None:
@@ -299,8 +315,8 @@ def run_serve(args: argparse.Namespace) -> int:
     )
     config_path = getattr(args, "config", None)
     retention = RetentionSettings.from_app_config(app_config)
-    # Argparse default is 7; treat that as "use AppConfig". Non-default CLI wins.
-    if args.retention_days != 7:
+    # Explicit --retention-days always wins over YAML (env still applied after).
+    if args.retention_days is not None:
         retention = RetentionSettings(
             raw_retention_days=args.retention_days,
             minute_retention_days=retention.minute_retention_days,

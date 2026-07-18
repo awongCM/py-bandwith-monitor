@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
 
 from monitor.models import AlertEvent
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -36,9 +39,14 @@ class WebhookNotifier:
         payload = self.build_payload(alert)
         client = self._client or httpx.Client(timeout=self._timeout)
         try:
-            client.post(self.url, json=payload)
+            response = client.post(self.url, json=payload)
+            response.raise_for_status()
         except Exception:
-            pass
+            logger.warning(
+                "Webhook notification failed for rule %s",
+                alert.rule_id,
+                exc_info=True,
+            )
         finally:
             if self._owns_client:
                 client.close()

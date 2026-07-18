@@ -116,14 +116,17 @@ class AlertSettings:
         if env_webhook is not None:
             webhook_url = env_webhook.strip() or None
 
+        sustained = _env_float("ALERT_BANDWIDTH_SUSTAINED_SECONDS")
+        cooldown = _env_float("ALERT_COOLDOWN_SECONDS")
         return cls(
             webhook_url=webhook_url,
             bandwidth_mbps_threshold=bandwidth_mbps,
             recv_bps_threshold=recv_bps,
             sent_bps_threshold=sent_bps,
-            bandwidth_sustained_seconds=_env_float("ALERT_BANDWIDTH_SUSTAINED_SECONDS")
-            or 30.0,
+            bandwidth_sustained_seconds=(
+                sustained if sustained is not None else 30.0
+            ),
             error_delta_threshold=error_delta,
-            cooldown_seconds=_env_float("ALERT_COOLDOWN_SECONDS") or 300.0,
+            cooldown_seconds=cooldown if cooldown is not None else 300.0,
             notify_health_events=_env_flag("ALERT_NOTIFY_HEALTH", True),
         )

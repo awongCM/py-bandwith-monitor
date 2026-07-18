@@ -93,12 +93,12 @@ class ConfigParsingTests(unittest.TestCase):
             command="serve",
             include=[],
             exclude=[],
-            host="127.0.0.1",
-            port=8080,
-            db="monitor.db",
-            interval=1.0,
-            history_size=3600,
-            retention_days=7,
+            host=None,
+            port=None,
+            db=None,
+            interval=None,
+            history_size=None,
+            retention_days=None,
         )
         config = AppConfig(
             interfaces=InterfaceConfig(include=("en0",), exclude=("utun*",)),
@@ -112,6 +112,31 @@ class ConfigParsingTests(unittest.TestCase):
         self.assertEqual(args.host, "0.0.0.0")
         self.assertEqual(args.port, 9000)
         self.assertEqual(args.retention_days, 14)
+
+    def test_explicit_cli_defaults_override_config(self) -> None:
+        args = argparse.Namespace(
+            command="serve",
+            include=[],
+            exclude=[],
+            host="127.0.0.1",
+            port=8080,
+            db="monitor.db",
+            interval=1.0,
+            history_size=3600,
+            retention_days=7,
+        )
+        config = AppConfig(
+            sampling=SamplingConfig(interval=2.0, history_size=7200),
+            server=ServerConfig(host="0.0.0.0", port=9000, db="data/monitor.db"),
+            retention=RetentionConfig(days=14),
+        )
+        apply_config_defaults(args, config)
+        self.assertEqual(args.host, "127.0.0.1")
+        self.assertEqual(args.port, 8080)
+        self.assertEqual(args.db, "monitor.db")
+        self.assertEqual(args.interval, 1.0)
+        self.assertEqual(args.history_size, 3600)
+        self.assertEqual(args.retention_days, 7)
 
 
 if __name__ == "__main__":
