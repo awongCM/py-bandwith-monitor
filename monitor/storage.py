@@ -172,10 +172,9 @@ class MetricsDatabase:
 
     def init_schema(self) -> None:
         with self._lock:
-            if self._table_columns("rate_samples") and (
-                "host_id" not in self._table_columns("rate_samples")
-            ):
-                self._migrate_host_id_locked()
+            # Migrate existing tables before SCHEMA so CREATE INDEX on host_id
+            # succeeds even after a mid-migration crash left mixed schemas.
+            self._migrate_host_id_locked()
             self._conn.executescript(SCHEMA)
             self._migrate_host_id_locked()
             self._conn.commit()
@@ -185,23 +184,27 @@ class MetricsDatabase:
         return {row[1] for row in rows}
 
     def _migrate_host_id_locked(self) -> None:
-        if "host_id" in self._table_columns("rate_samples"):
-            return
+        """Add host_id per table. Safe to re-run after partial migration."""
         for table in (
             "rate_samples",
             "interface_snapshots",
             "health_events",
             "alert_events",
         ):
-            self._conn.execute(
-                f"ALTER TABLE {table} ADD COLUMN host_id TEXT NOT NULL DEFAULT '{LOCAL_HOST_ID}'"
-            )
+            cols = self._table_columns(table)
+            if cols and "host_id" not in cols:
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN host_id TEXT NOT NULL "
+                    f"DEFAULT '{LOCAL_HOST_ID}'"
+                )
         for table in (
             "rate_samples_minute",
             "rate_samples_hourly",
             "rate_samples_daily",
         ):
-            self._rebuild_rollup_with_host_id_locked(table)
+            cols = self._table_columns(table)
+            if cols and "host_id" not in cols:
+                self._rebuild_rollup_with_host_id_locked(table)
 
     def _rebuild_rollup_with_host_id_locked(self, table: str) -> None:
         staging = f"{table}_host_migrate"
