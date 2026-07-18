@@ -26,7 +26,7 @@ retention:
   daily_samples_days: 365
 
 thresholds:
-  # Placeholders for Phase 3 alert engine (not yet implemented).
+  # Alert engine thresholds (null = disabled / use defaults from env/settings).
   recv_bps: null
   sent_bps: null
   total_bps: null

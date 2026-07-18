@@ -600,7 +600,7 @@ class MetricsDatabase:
             )
             self._conn.execute(
                 "DELETE FROM alert_events WHERE timestamp < ?",
-                (cutoff,),
+                (before,),
             )
             self._conn.commit()
 

@@ -5,21 +5,25 @@ services:
       - "8080:8080"
     volumes:
       - monitor-data:/data
+      # Copy config.example.yaml → ./config.yaml and edit before first start.
+      - ./config.yaml:/data/config.yaml:ro
+    environment:
+      # Optional; overrides notifications.webhook_url in config.yaml
+      # ALERT_WEBHOOK_URL: https://hooks.example.com/alert
     restart: unless-stopped
-    # Override interface filters for your host, e.g. Raspberry Pi eth0 or Mac en0:
-    # command:
-    #   - python
-    #   - -m
-    #   - monitor
-    #   - serve
-    #   - --host
-    #   - 0.0.0.0
-    #   - --port
-    #   - "8080"
-    #   - --db
-    #   - /data/monitor.db
-    #   - --include
-    #   - eth0
+    command:
+      - python
+      - -m
+      - monitor
+      - serve
+      - --config
+      - /data/config.yaml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --db
+      - /data/monitor.db
 
 volumes:
   monitor-data:
