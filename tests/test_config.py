@@ -148,6 +148,24 @@ class ConfigParsingTests(unittest.TestCase):
         self.assertEqual(args.history_size, 3600)
         self.assertEqual(args.retention_days, 7)
 
+    def test_apply_config_defaults_for_agent(self) -> None:
+        args = argparse.Namespace(
+            command="agent",
+            include=[],
+            exclude=[],
+            interval=None,
+            history_size=None,
+        )
+        config = AppConfig(
+            interfaces=InterfaceConfig(include=("en0",), exclude=("utun*",)),
+            sampling=SamplingConfig(interval=2.0, history_size=7200),
+        )
+        apply_config_defaults(args, config)
+        self.assertEqual(args.include, ["en0"])
+        self.assertEqual(args.exclude, ["utun*"])
+        self.assertEqual(args.interval, 2.0)
+        self.assertEqual(args.history_size, 7200)
+
 
 if __name__ == "__main__":
     unittest.main()
