@@ -297,6 +297,101 @@ class HostIdStorageTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_recovers_orphaned_rollup_staging(self) -> None:
+        """Crash after DROP left data only in *_host_migrate; SCHEMA made empty live table."""
+        now = time.time()
+        bucket = float(int(now // 60) * 60)
+        conn = sqlite3.connect(self.path)
+        conn.executescript(
+            """
+            CREATE TABLE rate_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                host_id TEXT NOT NULL,
+                interface TEXT NOT NULL,
+                recv_bps REAL NOT NULL,
+                sent_bps REAL NOT NULL,
+                recv_pps REAL NOT NULL,
+                sent_pps REAL NOT NULL
+            );
+            CREATE TABLE rate_samples_minute (
+                bucket_start REAL NOT NULL,
+                host_id TEXT NOT NULL,
+                interface TEXT NOT NULL,
+                recv_bps REAL NOT NULL,
+                sent_bps REAL NOT NULL,
+                recv_pps REAL NOT NULL,
+                sent_pps REAL NOT NULL,
+                sample_count INTEGER NOT NULL,
+                PRIMARY KEY (bucket_start, host_id, interface)
+            );
+            CREATE TABLE rate_samples_minute_host_migrate (
+                bucket_start REAL NOT NULL,
+                host_id TEXT NOT NULL,
+                interface TEXT NOT NULL,
+                recv_bps REAL NOT NULL,
+                sent_bps REAL NOT NULL,
+                recv_pps REAL NOT NULL,
+                sent_pps REAL NOT NULL,
+                sample_count INTEGER NOT NULL,
+                PRIMARY KEY (bucket_start, host_id, interface)
+            );
+            CREATE TABLE rate_samples_hourly (
+                bucket_start REAL NOT NULL,
+                host_id TEXT NOT NULL,
+                interface TEXT NOT NULL,
+                recv_bps REAL NOT NULL,
+                sent_bps REAL NOT NULL,
+                recv_pps REAL NOT NULL,
+                sent_pps REAL NOT NULL,
+                sample_count INTEGER NOT NULL,
+                PRIMARY KEY (bucket_start, host_id, interface)
+            );
+            CREATE TABLE rate_samples_daily (
+                bucket_start REAL NOT NULL,
+                host_id TEXT NOT NULL,
+                interface TEXT NOT NULL,
+                recv_bps REAL NOT NULL,
+                sent_bps REAL NOT NULL,
+                recv_pps REAL NOT NULL,
+                sent_pps REAL NOT NULL,
+                sample_count INTEGER NOT NULL,
+                PRIMARY KEY (bucket_start, host_id, interface)
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO rate_samples_minute_host_migrate (
+                bucket_start, host_id, interface, recv_bps, sent_bps,
+                recv_pps, sent_pps, sample_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (bucket, LOCAL_HOST_ID, AGGREGATE_INTERFACE, 77.0, 11.0, 0.0, 0.0, 1),
+        )
+        conn.commit()
+        conn.close()
+
+        db = MetricsDatabase(self.path)
+        try:
+            staging = db._conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'rate_samples_minute_host_migrate'
+                """
+            ).fetchone()
+            self.assertIsNone(staging)
+            rows = db.get_rate_history(
+                AGGREGATE_INTERFACE,
+                minutes=60,
+                resolution="minute",
+                host_id=LOCAL_HOST_ID,
+            )
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["recv_bps"], 77.0)
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

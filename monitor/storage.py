@@ -183,8 +183,63 @@ class MetricsDatabase:
         rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
         return {row[1] for row in rows}
 
+    def _table_exists(self, table: str) -> bool:
+        row = self._conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            """,
+            (table,),
+        ).fetchone()
+        return row is not None
+
+    def _table_row_count(self, table: str) -> int:
+        row = self._conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def _recover_rollup_migrate_locked(self, table: str) -> None:
+        """Restore rollup data after a crash during DROP/RENAME rebuild."""
+        staging = f"{table}_host_migrate"
+        backup = f"{table}_pre_host_migrate"
+        staging_exists = self._table_exists(staging)
+        backup_exists = self._table_exists(backup)
+        table_exists = self._table_exists(table)
+
+        if staging_exists and not table_exists:
+            self._conn.execute(f"ALTER TABLE {staging} RENAME TO {table}")
+            staging_exists = False
+            table_exists = True
+        elif staging_exists and table_exists and self._table_row_count(table) == 0:
+            # SCHEMA recreated an empty live table; staging holds the copy.
+            self._conn.execute(f"DROP TABLE {table}")
+            self._conn.execute(f"ALTER TABLE {staging} RENAME TO {table}")
+            staging_exists = False
+        elif staging_exists and table_exists and "host_id" in self._table_columns(table):
+            self._conn.execute(f"DROP TABLE {staging}")
+            staging_exists = False
+
+        if backup_exists:
+            if not table_exists:
+                self._conn.execute(f"ALTER TABLE {backup} RENAME TO {table}")
+            elif "host_id" in self._table_columns(table):
+                self._conn.execute(f"DROP TABLE {backup}")
+            else:
+                # Prefer staging/new data when present; otherwise keep backup as source.
+                if staging_exists:
+                    self._conn.execute(f"DROP TABLE {backup}")
+                else:
+                    self._conn.execute(f"DROP TABLE {table}")
+                    self._conn.execute(f"ALTER TABLE {backup} RENAME TO {table}")
+
     def _migrate_host_id_locked(self) -> None:
         """Add host_id per table. Safe to re-run after partial migration."""
+        for table in (
+            "rate_samples_minute",
+            "rate_samples_hourly",
+            "rate_samples_daily",
+        ):
+            self._recover_rollup_migrate_locked(table)
+
         for table in (
             "rate_samples",
             "interface_snapshots",
@@ -208,7 +263,15 @@ class MetricsDatabase:
 
     def _rebuild_rollup_with_host_id_locked(self, table: str) -> None:
         staging = f"{table}_host_migrate"
+        backup = f"{table}_pre_host_migrate"
+        # Never DROP staging if it might be the only copy of migrated rows.
+        if self._table_exists(staging):
+            self._recover_rollup_migrate_locked(table)
+            if "host_id" in self._table_columns(table):
+                return
+
         self._conn.execute(f"DROP TABLE IF EXISTS {staging}")
+        self._conn.execute(f"DROP TABLE IF EXISTS {backup}")
         self._conn.execute(
             f"""
             CREATE TABLE {staging} (
@@ -237,8 +300,10 @@ class MetricsDatabase:
             """,
             (LOCAL_HOST_ID,),
         )
-        self._conn.execute(f"DROP TABLE {table}")
+        # Rename instead of DROP so a crash never orphans the only copy.
+        self._conn.execute(f"ALTER TABLE {table} RENAME TO {backup}")
         self._conn.execute(f"ALTER TABLE {staging} RENAME TO {table}")
+        self._conn.execute(f"DROP TABLE {backup}")
         self._conn.execute(
             f"""
             CREATE INDEX idx_{table}_host_iface_ts

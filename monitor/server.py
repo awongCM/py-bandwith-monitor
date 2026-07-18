@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 from contextlib import asynccontextmanager
@@ -227,7 +228,9 @@ def create_app(
                 status_code=503,
                 detail="Agent ingest is not configured",
             )
-        if authorization != f"Bearer {token}":
+        expected = f"Bearer {token}"
+        provided = authorization or ""
+        if not hmac.compare_digest(provided, expected):
             raise HTTPException(
                 status_code=401,
                 detail="Invalid or missing agent token",

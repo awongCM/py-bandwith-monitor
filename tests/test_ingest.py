@@ -52,6 +52,15 @@ class IngestTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
 
+    def test_rejects_wrong_token(self) -> None:
+        response = self.client.post(
+            "/api/agents/samples",
+            headers={"Authorization": "Bearer wrong"},
+            json=self._payload(),
+        )
+
+        self.assertEqual(response.status_code, 401)
+
     def test_rejects_when_token_not_configured(self) -> None:
         app = create_app(db_path=self.db_path + ".notoken", agent_token=None)
         client = TestClient(app)

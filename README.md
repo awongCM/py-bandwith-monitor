@@ -564,7 +564,8 @@ reporting agents. Hosts with no samples for ~30s are labeled offline.
 
 **Security:** ingest requires the shared token; read APIs and the dashboard are
 still open. Do not expose the hub publicly without a reverse proxy (and ideally
-auth) in front.
+auth) in front. Anyone with the shared token can post under any `host_id`
+(including `local`), so treat the token like a household secret.
 
 **Still future / deferred:** router APIs, SNMP, mirror-port collectors, and
 Eero/router household monitoring remain separate options — see
