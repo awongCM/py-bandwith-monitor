@@ -12,6 +12,7 @@ const downloadRateEl = document.getElementById("download-rate");
 const uploadRateEl = document.getElementById("upload-rate");
 const combinedRateEl = document.getElementById("combined-rate");
 const connectionStatusEl = document.getElementById("connection-status");
+const alertStatusEl = document.getElementById("alert-status");
 const interfaceSelectEl = document.getElementById("interface-select");
 const interfaceTableBodyEl = document.getElementById("interface-table-body");
 const healthListEl = document.getElementById("health-list");
@@ -53,6 +54,35 @@ function formatTime(timestamp) {
 function setConnectionStatus(mode, label) {
   connectionStatusEl.className = `status-pill status-${mode}`;
   connectionStatusEl.textContent = label;
+}
+
+function setAlertStatus(mode, label) {
+  alertStatusEl.hidden = false;
+  alertStatusEl.className = `status-pill status-alerts-${mode}`;
+  alertStatusEl.textContent = label;
+}
+
+async function refreshAlertStatus() {
+  const response = await fetch("/api/alerts/status");
+  const status = await response.json();
+  if (!status.bandwidth_enabled && !status.webhook_configured) {
+    alertStatusEl.hidden = true;
+    return;
+  }
+
+  const parts = [];
+  if (status.bandwidth_enabled) {
+    parts.push(`${status.bandwidth_mbps_threshold} Mbps`);
+  }
+  if (status.webhook_configured) {
+    parts.push("webhook");
+  }
+  setAlertStatus("armed", `Alerts: ${parts.join(", ")}`);
+}
+
+function markAlertFired(count) {
+  setAlertStatus("fired", `${count} alert${count === 1 ? "" : "s"} fired`);
+  window.setTimeout(refreshAlertStatus, 5000);
 }
 
 const overviewChart = new Chart(document.getElementById("overview-sparkline"), {
@@ -338,6 +368,10 @@ function handleLiveSample(payload) {
     prependHealthEvents(payload.health);
   }
 
+  if (payload.alerts?.length) {
+    markAlertFired(payload.alerts.length);
+  }
+
   if (
     state.selectedInterface &&
     payload.interfaces?.some((item) => item.name === state.selectedInterface)
@@ -397,7 +431,12 @@ rangeButtonsEl.addEventListener("click", (event) => {
 });
 
 async function bootstrap() {
-  await Promise.all([fetchOverviewHistory(), fetchInterfaceHistory(), refreshTables()]);
+  await Promise.all([
+    fetchOverviewHistory(),
+    fetchInterfaceHistory(),
+    refreshTables(),
+    refreshAlertStatus(),
+  ]);
   connectWebSocket();
   window.setInterval(refreshTables, 15000);
   window.setInterval(fetchInterfaceHistory, 30000);

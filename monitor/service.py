@@ -7,9 +7,11 @@ import threading
 from collections.abc import Callable
 from typing import Any, Iterable
 
+from monitor.alerts import AlertEngine
 from monitor.collector import BandwidthCollector, list_interface_stats
 from monitor.health import HealthMonitor
-from monitor.models import AggregateRates
+from monitor.models import AggregateRates, AlertEvent
+from monitor.notifiers import Notifier
 from monitor.retention import RetentionSettings
 from monitor.storage import MetricsDatabase
 
@@ -28,6 +30,9 @@ class SamplingService:
         retention: RetentionSettings | None = None,
         retention_days: int | None = None,
         on_sample: Callable[[dict[str, Any]], None] | None = None,
+        alert_engine: AlertEngine | None = None,
+        notifiers: Iterable[Notifier] | None = None,
+        error_delta_threshold: int | None = None,
     ) -> None:
         self.database = database
         self.interval = interval
@@ -47,13 +52,18 @@ class SamplingService:
             )
         self.retention = retention
         self.on_sample = on_sample
+        self.alert_engine = alert_engine
+        self.notifiers = tuple(notifiers or ())
         self.collector = BandwidthCollector(
             interval=interval,
             history_size=history_size,
             include=include,
             exclude=exclude,
         )
-        self.health_monitor = HealthMonitor()
+        health_kwargs: dict[str, int] = {}
+        if error_delta_threshold is not None:
+            health_kwargs["error_delta_threshold"] = error_delta_threshold
+        self.health_monitor = HealthMonitor(**health_kwargs)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._samples_since_maintenance = 0
@@ -97,6 +107,18 @@ class SamplingService:
         for event in events:
             self.database.insert_health_event(event)
 
+        alerts: list[AlertEvent] = []
+        if self.alert_engine is not None:
+            alerts = self.alert_engine.evaluate(
+                sample,
+                interfaces,
+                events,
+                history_getter=self.database.get_rate_history,
+            )
+            for alert in alerts:
+                self.database.insert_alert_event(alert)
+                self._dispatch_alert(alert)
+
         self._samples_since_maintenance += 1
         if self._samples_since_maintenance >= self.retention.maintenance_interval_samples:
             self.database.run_retention_maintenance(self.retention)
@@ -112,8 +134,18 @@ class SamplingService:
                 "interfaces": [item.to_dict() for item in sample.interfaces],
                 "snapshots": [item.to_dict() for item in interfaces],
                 "health": [event.to_dict() for event in events],
+                "alerts": [alert.to_dict() for alert in alerts],
             }
             self.on_sample(payload)
+
+    def _dispatch_alert(self, alert: AlertEvent) -> None:
+        for notifier in self.notifiers:
+            threading.Thread(
+                target=notifier.notify,
+                args=(alert,),
+                name="alert-notifier",
+                daemon=True,
+            ).start()
 
 
 class WebSocketBridge:

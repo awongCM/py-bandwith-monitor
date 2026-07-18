@@ -11,6 +11,7 @@ from typing import Any, Iterable, Literal
 from monitor.models import (
     AGGREGATE_INTERFACE,
     AggregateRates,
+    AlertEvent,
     HealthEvent,
     InterfaceStats,
 )
@@ -113,6 +114,21 @@ CREATE TABLE IF NOT EXISTS health_events (
 
 CREATE INDEX IF NOT EXISTS idx_health_events_ts
     ON health_events(timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS alert_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL NOT NULL,
+    rule_id TEXT NOT NULL,
+    alert_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    interface TEXT NOT NULL,
+    message TEXT NOT NULL,
+    value REAL,
+    threshold REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_events_ts
+    ON alert_events(timestamp DESC);
 """
 
 _MINUTE_SECONDS = 60
@@ -248,6 +264,28 @@ class MetricsDatabase:
             )
             self._conn.commit()
 
+    def insert_alert_event(self, event: AlertEvent) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO alert_events (
+                    timestamp, rule_id, alert_type, severity, interface,
+                    message, value, threshold
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.timestamp,
+                    event.rule_id,
+                    event.alert_type,
+                    event.severity,
+                    event.interface,
+                    event.message,
+                    event.value,
+                    event.threshold,
+                ),
+            )
+            self._conn.commit()
+
     def get_rate_history(
         self,
         interface: str,
@@ -378,6 +416,20 @@ class MetricsDatabase:
                 """
                 SELECT timestamp, interface, event_type, severity, message, value
                 FROM health_events
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_alert_events(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT timestamp, rule_id, alert_type, severity, interface,
+                       message, value, threshold
+                FROM alert_events
                 ORDER BY timestamp DESC
                 LIMIT ?
                 """,
@@ -545,6 +597,10 @@ class MetricsDatabase:
             self._conn.execute(
                 "DELETE FROM health_events WHERE timestamp < ?",
                 (before,),
+            )
+            self._conn.execute(
+                "DELETE FROM alert_events WHERE timestamp < ?",
+                (cutoff,),
             )
             self._conn.commit()
 

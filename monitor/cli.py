@@ -293,9 +293,11 @@ def run_serve(args: argparse.Namespace) -> int:
     from monitor.server import create_app
 
     include, exclude = _interface_filters(args)
+    # Prefer AppConfig from sibling CLI when present; else optional --config path.
     app_config = getattr(args, "app_config", None) or load_config(
         getattr(args, "config", None)
     )
+    config_path = getattr(args, "config", None)
     retention = RetentionSettings.from_app_config(app_config)
     # Argparse default is 7; treat that as "use AppConfig". Non-default CLI wins.
     if args.retention_days != 7:
@@ -314,6 +316,8 @@ def run_serve(args: argparse.Namespace) -> int:
         include=include,
         exclude=exclude,
         retention=retention,
+        app_config=app_config,
+        config_path=config_path,
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
