@@ -109,3 +109,6 @@ monitor.db
 
 # Git worktrees used for parallel development
 worktrees/
+
+# Local runtime config (copy from config.example.yaml)
+config.yaml
