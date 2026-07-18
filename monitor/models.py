@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 AGGREGATE_INTERFACE = "__total__"
+LOCAL_HOST_ID = "local"
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,7 @@ class HealthEvent:
     severity: str
     message: str
     value: float | None = None
+    host_id: str = LOCAL_HOST_ID
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -85,6 +87,7 @@ class AlertEvent:
     interface: str = AGGREGATE_INTERFACE
     value: float | None = None
     threshold: float | None = None
+    host_id: str = LOCAL_HOST_ID
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

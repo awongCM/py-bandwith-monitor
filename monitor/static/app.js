@@ -1,8 +1,10 @@
 const AGGREGATE_INTERFACE = "__total__";
 
 const state = {
+  selectedHost: "local",
   selectedInterface: null,
   selectedMinutes: 5,
+  hosts: [],
   interfaces: [],
   overviewPoints: [],
   socket: null,
@@ -13,11 +15,16 @@ const uploadRateEl = document.getElementById("upload-rate");
 const combinedRateEl = document.getElementById("combined-rate");
 const connectionStatusEl = document.getElementById("connection-status");
 const alertStatusEl = document.getElementById("alert-status");
+const hostSelectEl = document.getElementById("host-select");
 const interfaceSelectEl = document.getElementById("interface-select");
 const interfaceTableBodyEl = document.getElementById("interface-table-body");
 const healthListEl = document.getElementById("health-list");
 const rangeButtonsEl = document.getElementById("range-buttons");
 const interfaceChartSubtitleEl = document.getElementById("interface-chart-subtitle");
+
+function hostQuery() {
+  return `host=${encodeURIComponent(state.selectedHost)}`;
+}
 
 function bitsToHuman(bitsPerSecond) {
   if (!Number.isFinite(bitsPerSecond) || bitsPerSecond < 0) {
@@ -188,13 +195,25 @@ function appendOverviewPoint(timestamp, recvBps, sentBps) {
   overviewChart.data.labels.push(label);
   overviewChart.data.datasets[0].data.push(recvBps);
   overviewChart.data.datasets[1].data.push(sentBps);
+  state.overviewPoints.push({ timestamp, recvBps, sentBps });
 
   const maxPoints = 120;
   while (overviewChart.data.labels.length > maxPoints) {
     overviewChart.data.labels.shift();
     overviewChart.data.datasets.forEach((dataset) => dataset.data.shift());
+    state.overviewPoints.shift();
   }
   overviewChart.update("none");
+}
+
+function clearOverviewChart() {
+  state.overviewPoints = [];
+  overviewChart.data.labels = [];
+  overviewChart.data.datasets.forEach((dataset) => {
+    dataset.data = [];
+  });
+  overviewChart.update("none");
+  updateOverviewRates(0, 0);
 }
 
 function renderInterfaceOptions(interfaces) {
@@ -295,14 +314,38 @@ function prependHealthEvents(events) {
   }
 }
 
+async function refreshHosts() {
+  const response = await fetch("/api/hosts");
+  const data = await response.json();
+  state.hosts = data.hosts || [];
+  hostSelectEl.innerHTML = "";
+  for (const host of state.hosts) {
+    const option = document.createElement("option");
+    option.value = host.host_id;
+    const badge = host.online ? "" : " (offline)";
+    option.textContent = `${host.host_id}${badge}`;
+    hostSelectEl.appendChild(option);
+  }
+  if (!state.hosts.some((h) => h.host_id === state.selectedHost)) {
+    const local = state.hosts.find((h) => h.host_id === "local");
+    state.selectedHost = local ? local.host_id : (state.hosts[0]?.host_id || "local");
+  }
+  hostSelectEl.value = state.selectedHost;
+}
+
 async function fetchOverviewHistory() {
-  const response = await fetch("/api/overview?minutes=5");
+  const response = await fetch(`/api/overview?minutes=5&${hostQuery()}`);
   const payload = await response.json();
   const history = payload.history || [];
 
   overviewChart.data.labels = history.map((item) => formatTime(item.timestamp));
   overviewChart.data.datasets[0].data = history.map((item) => item.recv_bps);
   overviewChart.data.datasets[1].data = history.map((item) => item.sent_bps);
+  state.overviewPoints = history.map((item) => ({
+    timestamp: item.timestamp,
+    recvBps: item.recv_bps,
+    sentBps: item.sent_bps,
+  }));
   overviewChart.update("none");
 
   if (payload.latest) {
@@ -325,7 +368,7 @@ async function fetchInterfaceHistory() {
   }
 
   const response = await fetch(
-    `/api/history?interface=${encodeURIComponent(state.selectedInterface)}&minutes=${state.selectedMinutes}`,
+    `/api/history?interface=${encodeURIComponent(state.selectedInterface)}&minutes=${state.selectedMinutes}&${hostQuery()}`,
   );
   const payload = await response.json();
   const samples = payload.samples || [];
@@ -339,8 +382,8 @@ async function fetchInterfaceHistory() {
 
 async function refreshTables() {
   const [interfacesResponse, healthResponse] = await Promise.all([
-    fetch("/api/interfaces"),
-    fetch("/api/health?limit=30"),
+    fetch(`/api/interfaces?${hostQuery()}`),
+    fetch(`/api/health?limit=30&${hostQuery()}`),
   ]);
 
   const interfacesPayload = await interfacesResponse.json();
@@ -353,6 +396,12 @@ async function refreshTables() {
   if (rates.length) {
     renderInterfaceOptions(rates);
   }
+}
+
+async function refreshDashboard() {
+  clearOverviewChart();
+  await Promise.all([fetchOverviewHistory(), refreshTables()]);
+  await fetchInterfaceHistory();
 }
 
 function handleLiveSample(payload) {
@@ -406,12 +455,22 @@ function connectWebSocket() {
   });
 
   state.socket.addEventListener("message", (event) => {
-    const payload = JSON.parse(event.data);
-    if (payload.type === "sample") {
-      handleLiveSample(payload);
+    const message = JSON.parse(event.data);
+    if (message.host_id && message.host_id !== state.selectedHost) {
+      return;
+    }
+    if (message.type === "sample") {
+      handleLiveSample(message);
     }
   });
 }
+
+hostSelectEl.addEventListener("change", async () => {
+  state.selectedHost = hostSelectEl.value;
+  state.overviewPoints = [];
+  state.selectedInterface = null;
+  await refreshDashboard();
+});
 
 interfaceSelectEl.addEventListener("change", () => {
   state.selectedInterface = interfaceSelectEl.value || null;
@@ -431,6 +490,7 @@ rangeButtonsEl.addEventListener("click", (event) => {
 });
 
 async function bootstrap() {
+  await refreshHosts();
   await Promise.all([
     fetchOverviewHistory(),
     fetchInterfaceHistory(),
@@ -440,6 +500,7 @@ async function bootstrap() {
   connectWebSocket();
   window.setInterval(refreshTables, 15000);
   window.setInterval(fetchInterfaceHistory, 30000);
+  window.setInterval(refreshHosts, 30000);
 }
 
 bootstrap();

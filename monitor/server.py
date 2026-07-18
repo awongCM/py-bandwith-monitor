@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import json
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from monitor.alerts import AlertEngine
 from monitor.alerts_settings import AlertSettings
-from monitor.models import AGGREGATE_INTERFACE
+from monitor.ingest import IngestError, parse_agent_sample
+from monitor.models import AGGREGATE_INTERFACE, LOCAL_HOST_ID
 from monitor.notifiers import build_notifiers
 from monitor.retention import RetentionSettings
 from monitor.service import SamplingService, WebSocketBridge
@@ -73,6 +77,8 @@ def create_app(
     alert_settings: AlertSettings | None = None,
     app_config: Any | None = None,
     config_path: str | Path | None = None,
+    host_id: str = LOCAL_HOST_ID,
+    agent_token: str | None = None,
 ) -> FastAPI:
     retention_settings = retention or RetentionSettings(
         raw_retention_days=retention_days,
@@ -81,6 +87,21 @@ def create_app(
     bridge = WebSocketBridge()
     manager = ConnectionManager()
     resolved_config = _resolve_app_config(app_config, config_path)
+    if resolved_config is not None and host_id == LOCAL_HOST_ID:
+        host_id = getattr(
+            getattr(resolved_config, "server", None),
+            "host_id",
+            host_id,
+        )
+    configured_agent_token = getattr(
+        getattr(resolved_config, "agents", None),
+        "token",
+        None,
+    )
+    agent_token = os.environ.get(
+        "MONITOR_AGENT_TOKEN",
+        agent_token or configured_agent_token,
+    )
     settings = alert_settings or AlertSettings.resolve(app_config=resolved_config)
     alert_engine = AlertEngine(settings, interval=interval)
     notifiers = build_notifiers(settings.webhook_url)
@@ -95,6 +116,7 @@ def create_app(
         alert_engine=alert_engine,
         notifiers=notifiers,
         error_delta_threshold=settings.error_delta_threshold,
+        host_id=host_id,
     )
 
     @asynccontextmanager
@@ -111,6 +133,8 @@ def create_app(
     app.state.service = service
     app.state.manager = manager
     app.state.alert_settings = settings
+    app.state.host_id = host_id
+    app.state.agent_token = agent_token
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -126,14 +150,24 @@ def create_app(
     async def overview(
         minutes: float = 5,
         resolution: Resolution = "auto",
+        host: str = LOCAL_HOST_ID,
     ) -> dict[str, Any]:
-        return database.get_overview(minutes=minutes, resolution=resolution)
+        return database.get_overview(
+            minutes=minutes,
+            resolution=resolution,
+            host_id=host,
+        )
+
+    @app.get("/api/hosts")
+    async def hosts() -> dict[str, Any]:
+        return {"hosts": database.list_hosts()}
 
     @app.get("/api/history")
     async def history(
         interface: str = AGGREGATE_INTERFACE,
         minutes: float = 5,
         resolution: Resolution = "auto",
+        host: str = LOCAL_HOST_ID,
     ) -> dict[str, Any]:
         tier = choose_resolution(minutes, resolution)
         return {
@@ -144,23 +178,30 @@ def create_app(
                 interface,
                 minutes=minutes,
                 resolution=resolution,
+                host_id=host,
             ),
         }
 
     @app.get("/api/interfaces")
-    async def interfaces() -> dict[str, Any]:
+    async def interfaces(host: str = LOCAL_HOST_ID) -> dict[str, Any]:
         return {
-            "snapshots": database.get_latest_interface_snapshots(),
-            "rates": database.get_latest_interface_rates(),
+            "snapshots": database.get_latest_interface_snapshots(host_id=host),
+            "rates": database.get_latest_interface_rates(host_id=host),
         }
 
     @app.get("/api/health")
-    async def health(limit: int = 50) -> dict[str, Any]:
-        return {"events": database.get_health_events(limit=limit)}
+    async def health(
+        limit: int = 50,
+        host: str = LOCAL_HOST_ID,
+    ) -> dict[str, Any]:
+        return {"events": database.get_health_events(limit=limit, host_id=host)}
 
     @app.get("/api/alerts")
-    async def alerts(limit: int = 50) -> dict[str, Any]:
-        return {"events": database.get_alert_events(limit=limit)}
+    async def alerts(
+        limit: int = 50,
+        host: str = LOCAL_HOST_ID,
+    ) -> dict[str, Any]:
+        return {"events": database.get_alert_events(limit=limit, host_id=host)}
 
     @app.get("/api/alerts/status")
     async def alerts_status() -> dict[str, Any]:
@@ -176,13 +217,58 @@ def create_app(
             "webhook_configured": bool(settings.webhook_url),
         }
 
+    @app.post("/api/agents/samples")
+    async def agent_samples(
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        token = app.state.agent_token
+        if not token:
+            raise HTTPException(
+                status_code=503,
+                detail="Agent ingest is not configured",
+            )
+        expected = f"Bearer {token}"
+        provided = authorization or ""
+        if not hmac.compare_digest(provided, expected):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or missing agent token",
+            )
+        try:
+            body = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid JSON body",
+            ) from exc
+        if not isinstance(body, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Request body must be a JSON object",
+            )
+        try:
+            host_id, sample, snapshots = parse_agent_sample(body)
+        except IngestError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            service.ingest_remote(host_id, sample, snapshots)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to persist sample",
+            ) from exc
+        return {"ok": True}
+
     @app.websocket("/ws/live")
     async def live_updates(websocket: WebSocket) -> None:
         await manager.connect(websocket)
         try:
-            latest = database.get_latest_rates()
+            latest = database.get_latest_rates(host_id=host_id)
             if latest is not None:
-                await websocket.send_json({"type": "hello", "latest": latest})
+                await websocket.send_json(
+                    {"type": "hello", "host_id": host_id, "latest": latest}
+                )
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:

@@ -173,6 +173,13 @@ label {
   font-size: 0.875rem;
 }
 
+.host-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
 select,
 button {
   font: inherit;

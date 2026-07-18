@@ -119,6 +119,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_interface_filters(serve_parser)
 
+    agent_parser = subparsers.add_parser(
+        "agent",
+        help="Sample local interfaces and post rates to a central hub.",
+    )
+    agent_parser.add_argument(
+        "--server",
+        required=True,
+        help="Hub base URL, e.g. http://192.168.1.10:8080",
+    )
+    agent_parser.add_argument(
+        "--token",
+        default=None,
+        help="Shared agent token (default: MONITOR_AGENT_TOKEN env).",
+    )
+    agent_parser.add_argument(
+        "--host-id",
+        default=None,
+        help="Override host id (default: hostname).",
+    )
+    agent_parser.add_argument("--interval", type=float, default=None)
+    agent_parser.add_argument("--history-size", type=int, default=None)
+    agent_parser.add_argument("--duration", type=float, default=None)
+    agent_parser.add_argument("--samples", type=int, default=None)
+    _add_interface_filters(agent_parser)
+
     return parser
 
 
@@ -152,7 +177,7 @@ def apply_config_defaults(args: argparse.Namespace, config: AppConfig) -> None:
     if not args.exclude:
         args.exclude = list(config.interfaces.exclude)
 
-    if args.command == "watch":
+    if args.command in {"watch", "agent"}:
         if args.interval is None:
             args.interval = config.sampling.interval
         if args.history_size is None:
@@ -334,6 +359,7 @@ def run_serve(args: argparse.Namespace) -> int:
         retention=retention,
         app_config=app_config,
         config_path=config_path,
+        host_id=app_config.server.host_id,
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
@@ -352,6 +378,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_watch(args)
     if args.command == "serve":
         return run_serve(args)
+    if args.command == "agent":
+        import os
+
+        from monitor.agent_client import resolve_agent_host_id, run_agent
+
+        token = args.token or os.environ.get("MONITOR_AGENT_TOKEN")
+        if not token:
+            print(
+                "Agent token required via --token or MONITOR_AGENT_TOKEN",
+                file=sys.stderr,
+            )
+            return 2
+        include, exclude = _interface_filters(args)
+        host_id = resolve_agent_host_id(args.host_id)
+        return run_agent(
+            server=args.server,
+            token=token,
+            host_id=host_id,
+            interval=args.interval,
+            history_size=args.history_size,
+            include=include or None,
+            exclude=exclude or None,
+            duration=args.duration,
+            samples=args.samples,
+        )
 
     parser.error(f"Unknown command: {args.command}")
     return 2

@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from monitor.models import LOCAL_HOST_ID
+
 DEFAULT_CONFIG_NAMES = ("config.yaml", "config.yml")
 
 
@@ -26,6 +28,12 @@ class ServerConfig:
     host: str = "127.0.0.1"
     port: int = 8080
     db: str = "monitor.db"
+    host_id: str = LOCAL_HOST_ID
+
+
+@dataclass(frozen=True)
+class AgentsConfig:
+    token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +62,7 @@ class AppConfig:
     interfaces: InterfaceConfig = field(default_factory=InterfaceConfig)
     sampling: SamplingConfig = field(default_factory=SamplingConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    agents: AgentsConfig = field(default_factory=AgentsConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     thresholds: ThresholdConfig = field(default_factory=ThresholdConfig)
     notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
@@ -100,6 +109,7 @@ def parse_config_data(data: Mapping[str, Any]) -> AppConfig:
     interfaces = _section(data, "interfaces")
     sampling = _section(data, "sampling")
     server = _section(data, "server")
+    agents = _section(data, "agents")
     retention = _section(data, "retention")
     thresholds = _section(data, "thresholds")
     notifications = _section(data, "notifications")
@@ -117,7 +127,9 @@ def parse_config_data(data: Mapping[str, Any]) -> AppConfig:
             host=str(server.get("host", "127.0.0.1")),
             port=int(server.get("port", 8080)),
             db=str(server.get("db", "monitor.db")),
+            host_id=str(server.get("host_id", LOCAL_HOST_ID)),
         ),
+        agents=AgentsConfig(token=_optional_str(agents.get("token"))),
         retention=RetentionConfig(
             days=int(retention.get("days", 7)),
             minute_samples_days=_optional_int(retention.get("minute_samples_days")),

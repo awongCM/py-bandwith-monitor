@@ -17,6 +17,13 @@ server:
   host: 127.0.0.1
   port: 8080
   db: monitor.db
+  # host_id for this machine's local sampler (default: local)
+  # host_id: local
+
+agents:
+  # Shared bearer token for POST /api/agents/samples
+  # Prefer MONITOR_AGENT_TOKEN env in production.
+  token: null
 
 retention:
   # Raw 1s samples; rollup tiers (Phase 3).

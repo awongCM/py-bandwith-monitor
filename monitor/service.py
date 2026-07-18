@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any, Iterable
 
 from monitor.alerts import AlertEngine
 from monitor.collector import BandwidthCollector, list_interface_stats
 from monitor.health import HealthMonitor
-from monitor.models import AggregateRates, AlertEvent
+from monitor.models import LOCAL_HOST_ID, AggregateRates, AlertEvent, InterfaceStats
 from monitor.notifiers import Notifier
 from monitor.retention import RetentionSettings
 from monitor.storage import MetricsDatabase
@@ -33,8 +35,10 @@ class SamplingService:
         alert_engine: AlertEngine | None = None,
         notifiers: Iterable[Notifier] | None = None,
         error_delta_threshold: int | None = None,
+        host_id: str = LOCAL_HOST_ID,
     ) -> None:
         self.database = database
+        self.host_id = host_id
         self.interval = interval
         self.include = tuple(include or ())
         self.exclude = tuple(exclude or ())
@@ -64,6 +68,12 @@ class SamplingService:
         if error_delta_threshold is not None:
             health_kwargs["error_delta_threshold"] = error_delta_threshold
         self.health_monitor = HealthMonitor(**health_kwargs)
+        self._health_monitors: dict[str, HealthMonitor] = {
+            host_id: self.health_monitor
+        }
+        self._alert_engines: dict[str, AlertEngine | None] = {
+            host_id: self.alert_engine
+        }
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._samples_since_maintenance = 0
@@ -96,28 +106,64 @@ class SamplingService:
             self._handle_sample(sample)
 
     def _rate_history(self, interface: str, *, minutes: float) -> list[dict[str, Any]]:
-        return self.database.get_rate_history(interface, minutes=minutes)
+        return self.database.get_rate_history(
+            interface,
+            minutes=minutes,
+            host_id=self.host_id,
+        )
 
     def _handle_sample(self, sample: AggregateRates) -> None:
         interfaces = list_interface_stats(
             include=self.include or None,
             exclude=self.exclude or None,
         )
-        self.database.insert_rates(sample)
-        self.database.insert_interface_snapshots(sample.timestamp, interfaces)
+        self._persist_sample(self.host_id, sample, interfaces)
 
-        events = self.health_monitor.evaluate(sample.timestamp, interfaces)
+    def ingest_remote(
+        self,
+        host_id: str,
+        sample: AggregateRates,
+        snapshots: list[InterfaceStats],
+    ) -> None:
+        """Persist a sample posted by a remote agent."""
+        self._persist_sample(host_id, sample, snapshots)
+
+    def _persist_sample(
+        self,
+        host_id: str,
+        sample: AggregateRates,
+        snapshots: list[InterfaceStats],
+    ) -> None:
+        self.database.insert_rates(sample, host_id=host_id)
+        if snapshots:
+            self.database.insert_interface_snapshots(
+                sample.timestamp,
+                snapshots,
+                host_id=host_id,
+            )
+
+        monitor = self._health_for_host(host_id)
+        events = [
+            replace(event, host_id=host_id)
+            for event in monitor.evaluate(sample.timestamp, snapshots)
+        ]
         for event in events:
             self.database.insert_health_event(event)
 
         alerts: list[AlertEvent] = []
-        if self.alert_engine is not None:
-            alerts = self.alert_engine.evaluate(
+        alert_engine = self._alert_for_host(host_id)
+        if alert_engine is not None:
+            alerts = alert_engine.evaluate(
                 sample,
-                interfaces,
+                snapshots,
                 events,
-                history_getter=self._rate_history,
+                history_getter=lambda interface, *, minutes: self.database.get_rate_history(
+                    interface,
+                    minutes=minutes,
+                    host_id=host_id,
+                ),
             )
+            alerts = [replace(alert, host_id=host_id) for alert in alerts]
             for alert in alerts:
                 self.database.insert_alert_event(alert)
                 self._dispatch_alert(alert)
@@ -136,16 +182,32 @@ class SamplingService:
         if self.on_sample is not None:
             payload = {
                 "type": "sample",
+                "host_id": host_id,
                 "timestamp": sample.timestamp,
                 "recv_bps": sample.recv_bps,
                 "sent_bps": sample.sent_bps,
                 "total_bps": sample.total_bps,
                 "interfaces": [item.to_dict() for item in sample.interfaces],
-                "snapshots": [item.to_dict() for item in interfaces],
+                "snapshots": [item.to_dict() for item in snapshots],
                 "health": [event.to_dict() for event in events],
                 "alerts": [alert.to_dict() for alert in alerts],
             }
             self.on_sample(payload)
+
+    def _health_for_host(self, host_id: str) -> HealthMonitor:
+        return self._health_monitors.setdefault(host_id, HealthMonitor(
+            error_delta_threshold=self.health_monitor.error_delta_threshold,
+            drop_delta_threshold=self.health_monitor.drop_delta_threshold,
+        ))
+
+    def _alert_for_host(self, host_id: str) -> AlertEngine | None:
+        if host_id not in self._alert_engines:
+            self._alert_engines[host_id] = (
+                copy.deepcopy(self.alert_engine)
+                if self.alert_engine is not None
+                else None
+            )
+        return self._alert_engines[host_id]
 
     def _dispatch_alert(self, alert: AlertEvent) -> None:
         for notifier in self.notifiers:
