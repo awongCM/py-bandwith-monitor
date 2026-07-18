@@ -89,6 +89,30 @@ class IngestTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_rejects_malformed_json(self) -> None:
+        response = self.client.post(
+            "/api/agents/samples",
+            headers={
+                "Authorization": "Bearer secret",
+                "Content-Type": "application/json",
+            },
+            content=b"{not json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_rejects_non_object_json(self) -> None:
+        response = self.client.post(
+            "/api/agents/samples",
+            headers={
+                "Authorization": "Bearer secret",
+                "Content-Type": "application/json",
+            },
+            content=b"[1, 2, 3]",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
     def test_evaluates_alerts_for_ingested_sample(self) -> None:
         app = create_app(
             db_path=self.db_path + ".alerts",

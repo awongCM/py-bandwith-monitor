@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -217,7 +218,7 @@ def create_app(
 
     @app.post("/api/agents/samples")
     async def agent_samples(
-        body: dict[str, Any],
+        request: Request,
         authorization: str | None = Header(default=None),
     ) -> dict[str, bool]:
         token = app.state.agent_token
@@ -230,6 +231,18 @@ def create_app(
             raise HTTPException(
                 status_code=401,
                 detail="Invalid or missing agent token",
+            )
+        try:
+            body = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid JSON body",
+            ) from exc
+        if not isinstance(body, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Request body must be a JSON object",
             )
         try:
             host_id, sample, snapshots = parse_agent_sample(body)
