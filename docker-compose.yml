@@ -1,0 +1,25 @@
+services:
+  bandwidth-monitor:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - monitor-data:/data
+    restart: unless-stopped
+    # Override interface filters for your host, e.g. Raspberry Pi eth0 or Mac en0:
+    # command:
+    #   - python
+    #   - -m
+    #   - monitor
+    #   - serve
+    #   - --host
+    #   - 0.0.0.0
+    #   - --port
+    #   - "8080"
+    #   - --db
+    #   - /data/monitor.db
+    #   - --include
+    #   - eth0
+
+volumes:
+  monitor-data:
