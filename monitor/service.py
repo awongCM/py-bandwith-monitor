@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any, Iterable
 
 from monitor.alerts import AlertEngine
 from monitor.collector import BandwidthCollector, list_interface_stats
 from monitor.health import HealthMonitor
-from monitor.models import AggregateRates, AlertEvent
+from monitor.models import LOCAL_HOST_ID, AggregateRates, AlertEvent
 from monitor.notifiers import Notifier
 from monitor.retention import RetentionSettings
 from monitor.storage import MetricsDatabase
@@ -33,8 +34,10 @@ class SamplingService:
         alert_engine: AlertEngine | None = None,
         notifiers: Iterable[Notifier] | None = None,
         error_delta_threshold: int | None = None,
+        host_id: str = LOCAL_HOST_ID,
     ) -> None:
         self.database = database
+        self.host_id = host_id
         self.interval = interval
         self.include = tuple(include or ())
         self.exclude = tuple(exclude or ())
@@ -96,17 +99,28 @@ class SamplingService:
             self._handle_sample(sample)
 
     def _rate_history(self, interface: str, *, minutes: float) -> list[dict[str, Any]]:
-        return self.database.get_rate_history(interface, minutes=minutes)
+        return self.database.get_rate_history(
+            interface,
+            minutes=minutes,
+            host_id=self.host_id,
+        )
 
     def _handle_sample(self, sample: AggregateRates) -> None:
         interfaces = list_interface_stats(
             include=self.include or None,
             exclude=self.exclude or None,
         )
-        self.database.insert_rates(sample)
-        self.database.insert_interface_snapshots(sample.timestamp, interfaces)
+        self.database.insert_rates(sample, host_id=self.host_id)
+        self.database.insert_interface_snapshots(
+            sample.timestamp,
+            interfaces,
+            host_id=self.host_id,
+        )
 
-        events = self.health_monitor.evaluate(sample.timestamp, interfaces)
+        events = [
+            replace(event, host_id=self.host_id)
+            for event in self.health_monitor.evaluate(sample.timestamp, interfaces)
+        ]
         for event in events:
             self.database.insert_health_event(event)
 
@@ -118,6 +132,7 @@ class SamplingService:
                 events,
                 history_getter=self._rate_history,
             )
+            alerts = [replace(alert, host_id=self.host_id) for alert in alerts]
             for alert in alerts:
                 self.database.insert_alert_event(alert)
                 self._dispatch_alert(alert)
@@ -136,6 +151,7 @@ class SamplingService:
         if self.on_sample is not None:
             payload = {
                 "type": "sample",
+                "host_id": self.host_id,
                 "timestamp": sample.timestamp,
                 "recv_bps": sample.recv_bps,
                 "sent_bps": sample.sent_bps,

@@ -334,6 +334,7 @@ def run_serve(args: argparse.Namespace) -> int:
         retention=retention,
         app_config=app_config,
         config_path=config_path,
+        host_id=app_config.server.host_id,
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0

@@ -55,6 +55,16 @@ class ConfigParsingTests(unittest.TestCase):
             "https://hooks.example.com/alert",
         )
 
+    def test_parse_agents_and_host_id(self) -> None:
+        config = parse_config_data(
+            {
+                "server": {"host_id": "hub-pi"},
+                "agents": {"token": "secret"},
+            }
+        )
+        self.assertEqual(config.server.host_id, "hub-pi")
+        self.assertEqual(config.agents.token, "secret")
+
     def test_empty_webhook_url_becomes_none(self) -> None:
         config = parse_config_data({"notifications": {"webhook_url": "  "}})
         self.assertIsNone(config.notifications.webhook_url)
