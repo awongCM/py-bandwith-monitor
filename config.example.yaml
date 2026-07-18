@@ -1,0 +1,37 @@
+# Copy to config.yaml and adjust for your host.
+# CLI flags override these values when both are set.
+
+interfaces:
+  # Only monitor matching interfaces (overrides default virtual-interface excludes).
+  # include:
+  #   - en0
+  #   - eth0
+  # Additional glob patterns to exclude from the default set.
+  exclude: []
+
+sampling:
+  interval: 1.0
+  history_size: 3600
+
+server:
+  host: 127.0.0.1
+  port: 8080
+  db: monitor.db
+
+retention:
+  # Raw 1s samples; rollup tiers (Phase 3).
+  days: 7
+  minute_samples_days: 30
+  hourly_samples_days: 90
+  daily_samples_days: 365
+
+thresholds:
+  # Alert engine thresholds (null = disabled / use defaults from env/settings).
+  recv_bps: null
+  sent_bps: null
+  total_bps: null
+  sustained_errors: null
+
+notifications:
+  # Webhook URL for alert delivery (ALERT_WEBHOOK_URL env var wins when set).
+  webhook_url: null

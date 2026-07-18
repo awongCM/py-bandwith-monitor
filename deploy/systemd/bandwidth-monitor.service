@@ -1,0 +1,31 @@
+[Unit]
+Description=Local network bandwidth monitor dashboard
+Documentation=https://github.com/andywongcheeming/py-bandwith-monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=monitor
+Group=monitor
+WorkingDirectory=/opt/bandwidth-monitor
+Environment=PYTHONUNBUFFERED=1
+# Optional: override notifications.webhook_url from config.yaml
+# Environment=ALERT_WEBHOOK_URL=https://hooks.example.com/alert
+ExecStart=/opt/bandwidth-monitor/.venv/bin/python -m monitor serve \
+    --config /etc/bandwidth-monitor/config.yaml \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --db /var/lib/bandwidth-monitor/monitor.db
+Restart=on-failure
+RestartSec=5
+
+# Hardening (optional; remove lines that break your setup)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bandwidth-monitor
+ReadOnlyPaths=/etc/bandwidth-monitor
+
+[Install]
+WantedBy=multi-user.target

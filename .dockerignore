@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.py[cod]
+*.db
+*.db-journal
+.pytest_cache
+htmlcov
+worktrees
+docs
+tests
+README.md
+LICENSE
+config.yaml

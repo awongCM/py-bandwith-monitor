@@ -73,3 +73,18 @@ class HealthEvent:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class AlertEvent:
+    timestamp: float
+    rule_id: str
+    alert_type: str
+    severity: str
+    message: str
+    interface: str = AGGREGATE_INTERFACE
+    value: float | None = None
+    threshold: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

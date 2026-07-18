@@ -26,6 +26,17 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(health.status_code, 200)
         self.assertIn("events", health.json())
 
+    def test_alerts_endpoints(self) -> None:
+        alerts = self.client.get("/api/alerts")
+        self.assertEqual(alerts.status_code, 200)
+        self.assertIn("events", alerts.json())
+
+        status = self.client.get("/api/alerts/status")
+        self.assertEqual(status.status_code, 200)
+        payload = status.json()
+        self.assertIn("bandwidth_enabled", payload)
+        self.assertIn("webhook_configured", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,30 @@
+services:
+  bandwidth-monitor:
+    build: .
+    # Host networking so psutil sees real NICs (Linux). On Docker Desktop
+    # (macOS/Windows), prefer a host venv/systemd/launchd install instead.
+    network_mode: host
+    volumes:
+      - monitor-data:/data
+      # Copy config.example.yaml → ./config.yaml and edit before first start.
+      - ./config.yaml:/data/config.yaml:ro
+    environment:
+      # Optional; overrides notifications.webhook_url in config.yaml
+      # ALERT_WEBHOOK_URL: https://hooks.example.com/alert
+    restart: unless-stopped
+    command:
+      - python
+      - -m
+      - monitor
+      - serve
+      - --config
+      - /data/config.yaml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --db
+      - /data/monitor.db
+
+volumes:
+  monitor-data:
