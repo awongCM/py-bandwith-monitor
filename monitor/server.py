@@ -220,7 +220,9 @@ def create_app(
         try:
             latest = database.get_latest_rates(host_id=host_id)
             if latest is not None:
-                await websocket.send_json({"type": "hello", "latest": latest})
+                await websocket.send_json(
+                    {"type": "hello", "host_id": host_id, "latest": latest}
+                )
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:

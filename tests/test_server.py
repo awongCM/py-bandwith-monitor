@@ -4,7 +4,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from monitor.models import AggregateRates, InterfaceRates
+from monitor.models import LOCAL_HOST_ID, AggregateRates, InterfaceRates
 from monitor.server import create_app
 
 
@@ -73,6 +73,23 @@ class ServerTests(unittest.TestCase):
             {host["host_id"] for host in response.json()["hosts"]},
             {"desktop", "laptop"},
         )
+
+    def test_live_websocket_hello_includes_host_id(self) -> None:
+        self.app.state.database.insert_rates(
+            AggregateRates(
+                timestamp=1_000_000_000.0,
+                recv_bps=100.0,
+                sent_bps=10.0,
+                interfaces=(),
+            ),
+            host_id=LOCAL_HOST_ID,
+        )
+
+        with self.client.websocket_connect("/ws/live") as websocket:
+            payload = websocket.receive_json()
+
+        self.assertEqual(payload["type"], "hello")
+        self.assertEqual(payload["host_id"], LOCAL_HOST_ID)
 
     def test_alerts_endpoints(self) -> None:
         alerts = self.client.get("/api/alerts")
