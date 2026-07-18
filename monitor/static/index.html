@@ -25,9 +25,17 @@
 
     <main class="dashboard">
       <section class="panel">
-        <div class="panel-header">
-          <h2>Live Overview</h2>
-          <p>Total upload and download across monitored interfaces</p>
+        <div class="panel-header panel-header-row">
+          <div>
+            <h2>Live Overview</h2>
+            <p>Total upload and download across monitored interfaces</p>
+          </div>
+          <div class="controls">
+            <label class="host-picker">
+              Host
+              <select id="host-select"></select>
+            </label>
+          </div>
         </div>
         <div class="stat-grid">
           <article class="stat-card">
