@@ -12,8 +12,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from monitor.models import AGGREGATE_INTERFACE
+from monitor.retention import RetentionSettings
 from monitor.service import SamplingService, WebSocketBridge
-from monitor.storage import MetricsDatabase
+from monitor.storage import MetricsDatabase, Resolution, choose_resolution
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -51,7 +52,11 @@ def create_app(
     include: tuple[str, ...] = (),
     exclude: tuple[str, ...] = (),
     retention_days: int = 7,
+    retention: RetentionSettings | None = None,
 ) -> FastAPI:
+    retention_settings = retention or RetentionSettings(
+        raw_retention_days=retention_days,
+    ).with_env_overrides()
     database = MetricsDatabase(db_path)
     bridge = WebSocketBridge()
     manager = ConnectionManager()
@@ -61,7 +66,7 @@ def create_app(
         history_size=history_size,
         include=include or None,
         exclude=exclude or None,
-        retention_days=retention_days,
+        retention=retention_settings,
         on_sample=bridge.publish,
     )
 
@@ -90,18 +95,28 @@ def create_app(
         return FileResponse(index_path)
 
     @app.get("/api/overview")
-    async def overview(minutes: float = 5) -> dict[str, Any]:
-        return database.get_overview(minutes=minutes)
+    async def overview(
+        minutes: float = 5,
+        resolution: Resolution = "auto",
+    ) -> dict[str, Any]:
+        return database.get_overview(minutes=minutes, resolution=resolution)
 
     @app.get("/api/history")
     async def history(
         interface: str = AGGREGATE_INTERFACE,
         minutes: float = 5,
+        resolution: Resolution = "auto",
     ) -> dict[str, Any]:
+        tier = choose_resolution(minutes, resolution)
         return {
             "interface": interface,
             "minutes": minutes,
-            "samples": database.get_rate_history(interface, minutes=minutes),
+            "resolution": tier,
+            "samples": database.get_rate_history(
+                interface,
+                minutes=minutes,
+                resolution=resolution,
+            ),
         }
 
     @app.get("/api/interfaces")

@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 from monitor.models import (
     AGGREGATE_INTERFACE,
@@ -14,6 +14,9 @@ from monitor.models import (
     HealthEvent,
     InterfaceStats,
 )
+from monitor.retention import RetentionSettings
+
+Resolution = Literal["raw", "minute", "hour", "day", "auto"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS rate_samples (
@@ -31,6 +34,48 @@ CREATE INDEX IF NOT EXISTS idx_rate_samples_ts
 
 CREATE INDEX IF NOT EXISTS idx_rate_samples_iface_ts
     ON rate_samples(interface, timestamp);
+
+CREATE TABLE IF NOT EXISTS rate_samples_minute (
+    bucket_start REAL NOT NULL,
+    interface TEXT NOT NULL,
+    recv_bps REAL NOT NULL,
+    sent_bps REAL NOT NULL,
+    recv_pps REAL NOT NULL,
+    sent_pps REAL NOT NULL,
+    sample_count INTEGER NOT NULL,
+    PRIMARY KEY (bucket_start, interface)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_samples_minute_iface_ts
+    ON rate_samples_minute(interface, bucket_start);
+
+CREATE TABLE IF NOT EXISTS rate_samples_hourly (
+    bucket_start REAL NOT NULL,
+    interface TEXT NOT NULL,
+    recv_bps REAL NOT NULL,
+    sent_bps REAL NOT NULL,
+    recv_pps REAL NOT NULL,
+    sent_pps REAL NOT NULL,
+    sample_count INTEGER NOT NULL,
+    PRIMARY KEY (bucket_start, interface)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_samples_hourly_iface_ts
+    ON rate_samples_hourly(interface, bucket_start);
+
+CREATE TABLE IF NOT EXISTS rate_samples_daily (
+    bucket_start REAL NOT NULL,
+    interface TEXT NOT NULL,
+    recv_bps REAL NOT NULL,
+    sent_bps REAL NOT NULL,
+    recv_pps REAL NOT NULL,
+    sent_pps REAL NOT NULL,
+    sample_count INTEGER NOT NULL,
+    PRIMARY KEY (bucket_start, interface)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_samples_daily_iface_ts
+    ON rate_samples_daily(interface, bucket_start);
 
 CREATE TABLE IF NOT EXISTS interface_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,6 +114,26 @@ CREATE TABLE IF NOT EXISTS health_events (
 CREATE INDEX IF NOT EXISTS idx_health_events_ts
     ON health_events(timestamp DESC);
 """
+
+_MINUTE_SECONDS = 60
+_HOUR_SECONDS = 3600
+_DAY_SECONDS = 86400
+
+
+def _floor_bucket(timestamp: float, bucket_seconds: int) -> float:
+    return float(int(timestamp // bucket_seconds) * bucket_seconds)
+
+
+def choose_resolution(minutes: float, resolution: Resolution = "auto") -> str:
+    if resolution != "auto":
+        return resolution
+    if minutes <= 180:
+        return "raw"
+    if minutes <= 30 * 24 * 60:
+        return "minute"
+    if minutes <= 90 * 24 * 60:
+        return "hour"
+    return "day"
 
 
 class MetricsDatabase:
@@ -188,8 +253,37 @@ class MetricsDatabase:
         interface: str,
         *,
         minutes: float,
+        resolution: Resolution = "auto",
     ) -> list[dict[str, Any]]:
-        since = time.time() - (minutes * 60)
+        now = time.time()
+        since = now - (minutes * 60)
+        tier = choose_resolution(minutes, resolution)
+        if tier == "raw":
+            return self._get_raw_rate_history(interface, since=since)
+        if tier == "minute":
+            return self._get_rollup_rate_history(
+                "rate_samples_minute",
+                interface,
+                since=since,
+            )
+        if tier == "hour":
+            return self._get_rollup_rate_history(
+                "rate_samples_hourly",
+                interface,
+                since=since,
+            )
+        return self._get_rollup_rate_history(
+            "rate_samples_daily",
+            interface,
+            since=since,
+        )
+
+    def _get_raw_rate_history(
+        self,
+        interface: str,
+        *,
+        since: float,
+    ) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
                 """
@@ -197,6 +291,31 @@ class MetricsDatabase:
                 FROM rate_samples
                 WHERE interface = ? AND timestamp >= ?
                 ORDER BY timestamp ASC
+                """,
+                (interface, since),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _get_rollup_rate_history(
+        self,
+        table: str,
+        interface: str,
+        *,
+        since: float,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT
+                    bucket_start AS timestamp,
+                    recv_bps,
+                    sent_bps,
+                    recv_pps,
+                    sent_pps,
+                    sample_count
+                FROM {table}
+                WHERE interface = ? AND bucket_start >= ?
+                ORDER BY bucket_start ASC
                 """,
                 (interface, since),
             ).fetchall()
@@ -266,30 +385,208 @@ class MetricsDatabase:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_overview(self, *, minutes: float = 5) -> dict[str, Any]:
+    def get_overview(
+        self,
+        *,
+        minutes: float = 5,
+        resolution: Resolution = "auto",
+    ) -> dict[str, Any]:
         latest = self.get_latest_rates()
-        history = self.get_rate_history(AGGREGATE_INTERFACE, minutes=minutes)
+        tier = choose_resolution(minutes, resolution)
+        history = self.get_rate_history(
+            AGGREGATE_INTERFACE,
+            minutes=minutes,
+            resolution=resolution,
+        )
         interfaces = self.get_latest_interface_rates()
         return {
             "latest": latest,
             "history": history,
             "interfaces": interfaces,
             "minutes": minutes,
+            "resolution": tier,
         }
 
-    def prune_old_data(self, *, days: int = 7) -> None:
-        cutoff = time.time() - (days * 86400)
+    def rollup_raw_to_minute(self, *, before: float) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO rate_samples_minute (
+                    bucket_start, interface, recv_bps, sent_bps,
+                    recv_pps, sent_pps, sample_count
+                )
+                SELECT
+                    CAST(timestamp / 60 AS INTEGER) * 60.0 AS bucket_start,
+                    interface,
+                    AVG(recv_bps),
+                    AVG(sent_bps),
+                    AVG(recv_pps),
+                    AVG(sent_pps),
+                    COUNT(*)
+                FROM rate_samples
+                WHERE timestamp < ?
+                GROUP BY bucket_start, interface
+                ON CONFLICT(bucket_start, interface) DO UPDATE SET
+                    recv_bps = excluded.recv_bps,
+                    sent_bps = excluded.sent_bps,
+                    recv_pps = excluded.recv_pps,
+                    sent_pps = excluded.sent_pps,
+                    sample_count = excluded.sample_count
+                """,
+                (before,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
+
+    def rollup_minute_to_hourly(self, *, before: float) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO rate_samples_hourly (
+                    bucket_start, interface, recv_bps, sent_bps,
+                    recv_pps, sent_pps, sample_count
+                )
+                SELECT
+                    CAST(bucket_start / 3600 AS INTEGER) * 3600.0 AS bucket_start,
+                    interface,
+                    AVG(recv_bps),
+                    AVG(sent_bps),
+                    AVG(recv_pps),
+                    AVG(sent_pps),
+                    SUM(sample_count)
+                FROM rate_samples_minute
+                WHERE bucket_start < ?
+                GROUP BY CAST(bucket_start / 3600 AS INTEGER), interface
+                ON CONFLICT(bucket_start, interface) DO UPDATE SET
+                    recv_bps = excluded.recv_bps,
+                    sent_bps = excluded.sent_bps,
+                    recv_pps = excluded.recv_pps,
+                    sent_pps = excluded.sent_pps,
+                    sample_count = excluded.sample_count
+                """,
+                (before,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
+
+    def rollup_hourly_to_daily(self, *, before: float) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO rate_samples_daily (
+                    bucket_start, interface, recv_bps, sent_bps,
+                    recv_pps, sent_pps, sample_count
+                )
+                SELECT
+                    CAST(bucket_start / 86400 AS INTEGER) * 86400.0 AS bucket_start,
+                    interface,
+                    AVG(recv_bps),
+                    AVG(sent_bps),
+                    AVG(recv_pps),
+                    AVG(sent_pps),
+                    SUM(sample_count)
+                FROM rate_samples_hourly
+                WHERE bucket_start < ?
+                GROUP BY CAST(bucket_start / 86400 AS INTEGER), interface
+                ON CONFLICT(bucket_start, interface) DO UPDATE SET
+                    recv_bps = excluded.recv_bps,
+                    sent_bps = excluded.sent_bps,
+                    recv_pps = excluded.recv_pps,
+                    sent_pps = excluded.sent_pps,
+                    sample_count = excluded.sample_count
+                """,
+                (before,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
+
+    def prune_rate_samples(self, *, before: float) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM rate_samples WHERE timestamp < ?",
+                (before,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
+
+    def prune_rate_samples_minute(self, *, before: float) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM rate_samples_minute WHERE bucket_start < ?",
+                (before,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
+
+    def prune_rate_samples_hourly(self, *, before: float) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM rate_samples_hourly WHERE bucket_start < ?",
+                (before,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
+
+    def prune_rate_samples_daily(self, *, before: float) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM rate_samples_daily WHERE bucket_start < ?",
+                (before,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
+
+    def prune_auxiliary_data(self, *, before: float) -> None:
         with self._lock:
             self._conn.execute(
-                "DELETE FROM rate_samples WHERE timestamp < ?",
-                (cutoff,),
-            )
-            self._conn.execute(
                 "DELETE FROM interface_snapshots WHERE timestamp < ?",
-                (cutoff,),
+                (before,),
             )
             self._conn.execute(
                 "DELETE FROM health_events WHERE timestamp < ?",
-                (cutoff,),
+                (before,),
             )
             self._conn.commit()
+
+    def run_retention_maintenance(
+        self,
+        settings: RetentionSettings | None = None,
+        *,
+        now: float | None = None,
+    ) -> dict[str, int]:
+        """Roll up completed buckets and prune each retention tier."""
+        settings = settings or RetentionSettings()
+        current = now if now is not None else time.time()
+        current_minute = _floor_bucket(current, _MINUTE_SECONDS)
+        current_hour = _floor_bucket(current, _HOUR_SECONDS)
+        current_day = _floor_bucket(current, _DAY_SECONDS)
+
+        minute_rows = self.rollup_raw_to_minute(before=current_minute)
+        hourly_rows = self.rollup_minute_to_hourly(before=current_hour)
+        daily_rows = self.rollup_hourly_to_daily(before=current_day)
+
+        raw_cutoff = current - (settings.raw_retention_days * _DAY_SECONDS)
+        minute_cutoff = current - (settings.minute_retention_days * _DAY_SECONDS)
+        hourly_cutoff = current - (settings.hourly_retention_days * _DAY_SECONDS)
+        daily_cutoff = current - (settings.daily_retention_days * _DAY_SECONDS)
+
+        raw_deleted = self.prune_rate_samples(before=raw_cutoff)
+        minute_deleted = self.prune_rate_samples_minute(before=minute_cutoff)
+        hourly_deleted = self.prune_rate_samples_hourly(before=hourly_cutoff)
+        daily_deleted = self.prune_rate_samples_daily(before=daily_cutoff)
+        self.prune_auxiliary_data(before=raw_cutoff)
+
+        return {
+            "minute_upserts": minute_rows,
+            "hourly_upserts": hourly_rows,
+            "daily_upserts": daily_rows,
+            "raw_deleted": raw_deleted,
+            "minute_deleted": minute_deleted,
+            "hourly_deleted": hourly_deleted,
+            "daily_deleted": daily_deleted,
+        }
+
+    def prune_old_data(self, *, days: int = 7) -> None:
+        """Backward-compatible prune hook for legacy callers."""
+        settings = RetentionSettings(raw_retention_days=days)
+        self.run_retention_maintenance(settings)

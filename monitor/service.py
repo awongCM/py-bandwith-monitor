@@ -10,6 +10,7 @@ from typing import Any, Iterable
 from monitor.collector import BandwidthCollector, list_interface_stats
 from monitor.health import HealthMonitor
 from monitor.models import AggregateRates
+from monitor.retention import RetentionSettings
 from monitor.storage import MetricsDatabase
 
 
@@ -24,14 +25,27 @@ class SamplingService:
         history_size: int = 3600,
         include: Iterable[str] | None = None,
         exclude: Iterable[str] | None = None,
-        retention_days: int = 7,
+        retention: RetentionSettings | None = None,
+        retention_days: int | None = None,
         on_sample: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.database = database
         self.interval = interval
         self.include = tuple(include or ())
         self.exclude = tuple(exclude or ())
-        self.retention_days = retention_days
+        if retention is not None and retention_days is not None:
+            retention = RetentionSettings(
+                raw_retention_days=retention_days,
+                minute_retention_days=retention.minute_retention_days,
+                hourly_retention_days=retention.hourly_retention_days,
+                daily_retention_days=retention.daily_retention_days,
+                maintenance_interval_samples=retention.maintenance_interval_samples,
+            )
+        elif retention is None:
+            retention = RetentionSettings(
+                raw_retention_days=retention_days if retention_days is not None else 7,
+            )
+        self.retention = retention
         self.on_sample = on_sample
         self.collector = BandwidthCollector(
             interval=interval,
@@ -42,7 +56,7 @@ class SamplingService:
         self.health_monitor = HealthMonitor()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._samples_since_prune = 0
+        self._samples_since_maintenance = 0
 
     @property
     def is_running(self) -> bool:
@@ -83,10 +97,10 @@ class SamplingService:
         for event in events:
             self.database.insert_health_event(event)
 
-        self._samples_since_prune += 1
-        if self._samples_since_prune >= 300:
-            self.database.prune_old_data(days=self.retention_days)
-            self._samples_since_prune = 0
+        self._samples_since_maintenance += 1
+        if self._samples_since_maintenance >= self.retention.maintenance_interval_samples:
+            self.database.run_retention_maintenance(self.retention)
+            self._samples_since_maintenance = 0
 
         if self.on_sample is not None:
             payload = {

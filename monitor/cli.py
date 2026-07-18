@@ -288,16 +288,32 @@ def run_watch(args: argparse.Namespace) -> int:
 def run_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
+    from monitor.config import load_config
+    from monitor.retention import RetentionSettings
     from monitor.server import create_app
 
     include, exclude = _interface_filters(args)
+    app_config = getattr(args, "app_config", None) or load_config(
+        getattr(args, "config", None)
+    )
+    retention = RetentionSettings.from_app_config(app_config)
+    # Argparse default is 7; treat that as "use AppConfig". Non-default CLI wins.
+    if args.retention_days != 7:
+        retention = RetentionSettings(
+            raw_retention_days=args.retention_days,
+            minute_retention_days=retention.minute_retention_days,
+            hourly_retention_days=retention.hourly_retention_days,
+            daily_retention_days=retention.daily_retention_days,
+            maintenance_interval_samples=retention.maintenance_interval_samples,
+        ).with_env_overrides()
+
     app = create_app(
         db_path=args.db,
         interval=args.interval,
         history_size=args.history_size,
         include=include,
         exclude=exclude,
-        retention_days=args.retention_days,
+        retention=retention,
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
