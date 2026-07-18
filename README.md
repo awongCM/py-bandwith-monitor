@@ -60,6 +60,12 @@ python -m monitor serve
 
 Open [http://127.0.0.1:8080](http://127.0.0.1:8080) in your browser.
 
+Run an agent that posts samples to a central hub (Phase 4):
+
+```bash
+python -m monitor agent --server http://HUB:8080 --token "$MONITOR_AGENT_TOKEN"
+```
+
 The legacy entry point still works:
 
 ```bash
@@ -90,6 +96,7 @@ Stop terminal commands with **Ctrl+C** (not Cmd+C — Cmd+C is copy on Mac).
 
 The dashboard includes:
 
+- **Host selector** — switch between the hub (`local`) and reporting agents
 - **Live overview** — total upload/download speeds with sparklines
 - **Per interface** — interface selector and 5 / 15 / 60 minute charts
 - **Interface table** — link status, cumulative totals, errors, and drops
@@ -113,7 +120,8 @@ The file is optional; defaults match the CLI when no config is present.
 |---------|------|---------|
 | `interfaces` | `include`, `exclude` | Glob patterns for monitored NICs |
 | `sampling` | `interval`, `history_size` | Sample interval and in-memory buffer |
-| `server` | `host`, `port`, `db` | Dashboard bind address and SQLite path |
+| `server` | `host`, `port`, `db`, `host_id` | Dashboard bind, SQLite path, local sampler id |
+| `agents` | `token` | Shared bearer token for agent ingest (`MONITOR_AGENT_TOKEN` preferred) |
 | `retention` | `days`, `minute_samples_days`, … | Raw + rollup retention windows |
 | `thresholds` | `recv_bps`, `sent_bps`, `total_bps`, … | Alert engine thresholds |
 | `notifications` | `webhook_url` | Optional alert webhook (`ALERT_WEBHOOK_URL` overrides) |
@@ -184,16 +192,19 @@ pkill -f "monitor serve"
 | `snapshot` | Print interface link status and cumulative byte/packet counters |
 | `watch` | Print live per-interface upload/download rates every interval |
 | `serve` | Start the FastAPI dashboard and background sampler |
+| `agent` | Sample local NICs and POST rates to a central hub |
 
 ## API
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/overview?minutes=5` | Latest totals plus aggregate history |
-| `GET /api/history?interface=eth0&minutes=15` | Per-interface rate history |
-| `GET /api/interfaces` | Latest interface snapshots and rates |
-| `GET /api/health?limit=50` | Recent health events |
-| `WS /ws/live` | Live sample stream for the dashboard |
+| `GET /api/hosts` | Known hosts and last-seen timestamps |
+| `GET /api/overview?minutes=5&host=local` | Latest totals plus aggregate history |
+| `GET /api/history?interface=eth0&minutes=15&host=local` | Per-interface rate history |
+| `GET /api/interfaces?host=local` | Latest interface snapshots and rates |
+| `GET /api/health?limit=50&host=local` | Recent health events |
+| `POST /api/agents/samples` | Agent ingest (Bearer token required) |
+| `WS /ws/live` | Live sample stream for the dashboard (`host_id` in hello/samples) |
 
 ---
 
@@ -201,16 +212,17 @@ pkill -f "monitor serve"
 
 | Monitors | Does not monitor (yet) |
 |----------|------------------------|
-| NICs on the machine running the tool | Other devices on the home LAN |
+| NICs on the hub and agent hosts | Devices without a running agent (phones/TVs unless an agent runs there) |
 | Cumulative kernel counters since boot | Per-process or per-connection usage |
 | Aggregate or per-interface upload/download rates | Router QoS, ISP usage caps, WAN-only traffic |
-| Local interface up/down and link speed | Remote hosts without an agent |
+| Local interface up/down and link speed | Router/Eero household views (deferred; separate spec) |
 
 **Original intent:** a small home utility to inspect bandwidth on the local
 machine — interface metadata, cumulative I/O, and live transfer rates.
 
-**Not in scope for Phases 1–2:** router/gateway APIs, SNMP, packet capture,
-multi-host agents, or LAN-wide per-device traffic.
+**Phase 4 adds:** lightweight agents that report the same NIC rates to a central
+hub. Router APIs, SNMP, packet capture, and Eero cloud monitoring remain out of
+scope for now.
 
 ---
 
@@ -221,7 +233,7 @@ multi-host agents, or LAN-wide per-device traffic.
 | **Phase 1** | Done | Collector refactor, CLI (`snapshot`, `watch`), per-interface rates |
 | **Phase 2** | Done | SQLite storage, FastAPI server, Chart.js dashboard |
 | **Phase 3** | Done | Config, retention rollups, alerts/webhook, Docker/systemd, integration tests |
-| **Phase 4** | Planned | Home LAN / multi-device monitoring (router APIs, agents) |
+| **Phase 4** | Done | Multi-host agents (per-device NIC rates → central hub) |
 
 ---
 
@@ -510,32 +522,62 @@ Set `ALERT_WEBHOOK_URL` as a Render secret if you use webhook notifications.
 
 ---
 
-### Phase 4 — Home LAN / multi-device monitoring (planned)
+### Phase 4 — Multi-host agents
 
-**Goal:** Monitor traffic beyond the local machine — other phones, TVs, laptops
-on the home network.
+**Goal:** Collect per-device NIC rates from other machines and show them on one
+central hub dashboard.
 
-**Important:** This is a separate layer on top of Phases 1–3. The current
-`psutil`-based collector cannot see other LAN devices without new data sources.
+**Implemented**
+
+- Shared bearer token on `POST /api/agents/samples` (`agents.token` or
+  `MONITOR_AGENT_TOKEN`)
+- `python -m monitor agent` samples local interfaces and posts to the hub
+- Metrics namespaced by `host_id` (hub local sampler defaults to `local`)
+- Dashboard host selector; charts/interfaces scoped to the selected host
+- Alerts and retention apply to both local and ingested samples
+
+**Hub setup**
+
+Set a shared token in `config.yaml` (or prefer `MONITOR_AGENT_TOKEN` in
+production). Bind on the LAN so agents can reach the hub:
+
+```yaml
+agents:
+  token: "replace-with-a-long-random-secret"
+```
+
+```bash
+export MONITOR_AGENT_TOKEN="replace-with-a-long-random-secret"
+python -m monitor serve --host 0.0.0.0 --port 8080
+```
+
+**Agent setup** (on each remote Python host)
+
+```bash
+export MONITOR_AGENT_TOKEN="replace-with-a-long-random-secret"
+python -m monitor agent --server http://HUB:8080
+# optional: --host-id my-laptop  (default: machine hostname)
+```
+
+**Dashboard:** use the host selector to switch between the hub (`local`) and
+reporting agents. Hosts with no samples for ~30s are labeled offline.
+
+**Security:** ingest requires the shared token; read APIs and the dashboard are
+still open. Do not expose the hub publicly without a reverse proxy (and ideally
+auth) in front.
+
+**Still future / deferred:** router APIs, SNMP, mirror-port collectors, and
+Eero/router household monitoring remain separate options — see
+`docs/superpowers/specs/2026-07-18-eero-monitor-design.md` (deferred).
 
 **Approach options**
 
-| Approach | Effort | What you get |
-|----------|--------|--------------|
-| Router API (UniFi, OpenWrt, pfSense) | Medium | Per-device traffic if the router exposes it |
-| SNMP from router | Medium | WAN/LAN totals, sometimes per-port |
-| Mirror port + flow collector (ntopng) | High | Full LAN visibility |
-| Agent on each device | Medium | Accurate per-machine stats, reports to central dashboard |
-
-**Planned deliverables**
-
-- Router adapter abstraction (plugin interface per vendor/API)
-- Optional lightweight agent that reports to the central FastAPI server
-- Multi-host dashboard view (device list, per-device charts)
-- Central SQLite or Postgres for aggregated multi-host metrics
-
-**Prerequisite:** Phase 3 deployment story (always-on collector host, persistent
-storage, stable API).
+| Approach | Effort | Status | What you get |
+|----------|--------|--------|--------------|
+| Agent on each device | Medium | **Implemented** | Accurate per-machine stats, reports to central dashboard |
+| Router API (UniFi, OpenWrt, pfSense) | Medium | Future | Per-device traffic if the router exposes it |
+| SNMP from router | Medium | Future | WAN/LAN totals, sometimes per-port |
+| Mirror port + flow collector (ntopng) | High | Future | Full LAN visibility |
 
 ---
 
@@ -543,15 +585,17 @@ storage, stable API).
 
 ```
 monitor/
-  cli.py           # snapshot, watch, serve commands
+  cli.py           # snapshot, watch, serve, agent commands
   config.py        # YAML startup config loader
   collector.py     # psutil sampling and rate calculation
+  agent_client.py  # remote agent loop (POST samples to hub)
+  ingest.py        # validate agent payloads
   retention.py     # rollup retention settings
   alerts.py        # threshold alert engine
   alerts_settings.py
   notifiers.py     # webhook notifications
-  storage.py       # SQLite persistence + rollups
-  service.py       # background sampler thread
+  storage.py       # SQLite persistence + rollups (host_id scoped)
+  service.py       # background sampler + remote ingest
   health.py        # link/error health events
   server.py        # FastAPI app
   models.py        # data types
@@ -566,7 +610,10 @@ tests/
   test_retention.py
   test_alerts.py
   test_storage.py
+  test_storage_hosts.py
   test_server.py
+  test_ingest.py
+  test_agent_client.py
   test_integration.py
 deploy/
   systemd/

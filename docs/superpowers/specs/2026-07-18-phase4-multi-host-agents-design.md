@@ -1,7 +1,7 @@
 # Phase 4 — Multi-Host Agents Design Spec
 
 **Date:** 2026-07-18  
-**Status:** Approved for implementation planning  
+**Status:** Implemented  
 **Repo:** `py-bandwidth-monitor`  
 **Related:** existing `monitor` package (Phases 1–3)  
 **Out of scope for this spec:** `docs/superpowers/specs/2026-07-18-eero-monitor-design.md` (deferred)
