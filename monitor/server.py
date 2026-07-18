@@ -8,12 +8,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from monitor.alerts import AlertEngine
 from monitor.alerts_settings import AlertSettings
+from monitor.ingest import IngestError, parse_agent_sample
 from monitor.models import AGGREGATE_INTERFACE, LOCAL_HOST_ID
 from monitor.notifiers import build_notifiers
 from monitor.retention import RetentionSettings
@@ -213,6 +214,35 @@ def create_app(
             "notifications_enabled": settings.notifications_enabled,
             "webhook_configured": bool(settings.webhook_url),
         }
+
+    @app.post("/api/agents/samples")
+    async def agent_samples(
+        body: dict[str, Any],
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        token = app.state.agent_token
+        if not token:
+            raise HTTPException(
+                status_code=503,
+                detail="Agent ingest is not configured",
+            )
+        if authorization != f"Bearer {token}":
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or missing agent token",
+            )
+        try:
+            host_id, sample, snapshots = parse_agent_sample(body)
+        except IngestError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            service.ingest_remote(host_id, sample, snapshots)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to persist sample",
+            ) from exc
+        return {"ok": True}
 
     @app.websocket("/ws/live")
     async def live_updates(websocket: WebSocket) -> None:
