@@ -15,11 +15,18 @@ updates.
 - `psutil`
 - `fastapi`
 - `uvicorn`
+- `pyyaml` (optional config file)
 
 ## Install
 
 ```bash
 pip install -r requirements.txt
+```
+
+For reproducible installs, use the pinned lockfile:
+
+```bash
+pip install -r requirements.lock
 ```
 
 Recommended: use a virtual environment.
@@ -94,10 +101,33 @@ for 7 days.
 python -m monitor serve --host 0.0.0.0 --port 8080 --db monitor.db --interval 1
 ```
 
+### Configuration file
+
+Copy `config.example.yaml` to `config.yaml` (or pass `--config /path/to/config.yaml`).
+The file is optional; defaults match the CLI when no config is present.
+
+| Section | Keys | Purpose |
+|---------|------|---------|
+| `interfaces` | `include`, `exclude` | Glob patterns for monitored NICs |
+| `sampling` | `interval`, `history_size` | Sample interval and in-memory buffer |
+| `server` | `host`, `port`, `db` | Dashboard bind address and SQLite path |
+| `retention` | `days`, `minute_samples_days`, … | Raw retention now; rollup placeholders for Phase 3 |
+| `thresholds` | `recv_bps`, `sent_bps`, … | Alert placeholders for Phase 3 |
+| `notifications` | `webhook_url` | Optional alert webhook (`ALERT_WEBHOOK_URL` overrides) |
+
+CLI flags override config values. Example for a LAN-accessible home host:
+
+```bash
+cp config.example.yaml config.yaml
+# edit interfaces.include for your NIC (e.g. en0)
+python -m monitor serve
+```
+
 ### Interface filters
 
 By default, loopback and common virtual interfaces are excluded (`lo`,
-`docker*`, `veth*`, `br-*`, `virbr*`).
+`tun*`, `utun*`, `docker*`, `veth*`, `br-*`, `virbr*`, `wg*`, `vmnet*`, and
+similar tunnel/container patterns).
 
 Monitor only specific interfaces:
 
@@ -391,6 +421,7 @@ storage, stable API).
 ```
 monitor/
   cli.py           # snapshot, watch, serve commands
+  config.py        # YAML startup config loader
   collector.py     # psutil sampling and rate calculation
   storage.py       # SQLite persistence
   service.py       # background sampler thread
@@ -407,7 +438,9 @@ tests/
   test_storage.py  # SQLite + health tests
   test_server.py   # API endpoint tests
 main.py            # legacy entry point
+config.example.yaml
 requirements.txt
+requirements.lock  # pinned transitive deps (uv pip compile)
 monitor.db         # created at runtime (gitignored)
 ```
 

@@ -7,6 +7,7 @@ import psutil
 
 from monitor.collector import (
     BandwidthCollector,
+    is_virtual_interface,
     should_include_interface,
     sample_rates,
 )
@@ -20,8 +21,33 @@ class InterfaceFilterTests(unittest.TestCase):
         self.assertFalse(should_include_interface("veth123"))
         self.assertTrue(should_include_interface("eth0"))
 
+    def test_default_excludes_common_virtual_interfaces(self) -> None:
+        for name in (
+            "utun0",
+            "tun0",
+            "tap0",
+            "wg0",
+            "tailscale0",
+            "vmnet1",
+            "awdl0",
+            "cni0",
+            "ifb0",
+            "dummy0",
+        ):
+            self.assertFalse(should_include_interface(name), name)
+            self.assertTrue(is_virtual_interface(name), name)
+
+    def test_physical_interfaces_are_included(self) -> None:
+        for name in ("eth0", "en0", "wlan0", "en1"):
+            self.assertTrue(should_include_interface(name), name)
+            self.assertFalse(is_virtual_interface(name), name)
+
     def test_include_patterns_override_default(self) -> None:
         self.assertTrue(should_include_interface("lo", include=("lo",)))
+
+    def test_config_exclude_patterns_merge_with_defaults(self) -> None:
+        self.assertFalse(should_include_interface("custom0", exclude=("custom0",)))
+        self.assertFalse(should_include_interface("docker0", exclude=("custom0",)))
 
 
 class FormattingTests(unittest.TestCase):

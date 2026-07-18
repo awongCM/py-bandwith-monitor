@@ -13,7 +13,48 @@ import psutil
 from monitor.formatting import duplex_label
 from monitor.models import AggregateRates, InterfaceRates, InterfaceStats
 
-DEFAULT_EXCLUDE_PATTERNS = ("lo", "lo*", "docker*", "veth*", "br-*", "virbr*")
+DEFAULT_EXCLUDE_PATTERNS = (
+    # Loopback
+    "lo",
+    "lo*",
+    # Containers and bridges
+    "docker*",
+    "veth*",
+    "br-*",
+    "virbr*",
+    "cni*",
+    "flannel*",
+    "cali*",
+    "cilium*",
+    "lxc*",
+    "kube*",
+    # VPN and tunnel interfaces
+    "tun*",
+    "tap*",
+    "utun*",
+    "wg*",
+    "tailscale*",
+    "ipsec*",
+    "ppp*",
+    "gif*",
+    "stf*",
+    # Virtual machine NICs
+    "vmnet*",
+    "vboxnet*",
+    # macOS wireless direct / sidecar interfaces
+    "awdl*",
+    "llw*",
+    "ap*",
+    "anpi*",
+    # Linux traffic-shaping stubs
+    "ifb*",
+    "dummy*",
+)
+
+
+def is_virtual_interface(name: str) -> bool:
+    """Return True when *name* matches a known virtual-interface pattern."""
+    return any(fnmatch.fnmatch(name, pattern) for pattern in DEFAULT_EXCLUDE_PATTERNS)
 
 
 def should_include_interface(
@@ -24,7 +65,7 @@ def should_include_interface(
 ) -> bool:
     """Return True when an interface should be included in monitoring."""
     include_patterns = tuple(include or ())
-    exclude_patterns = tuple(exclude or DEFAULT_EXCLUDE_PATTERNS)
+    exclude_patterns = DEFAULT_EXCLUDE_PATTERNS + tuple(exclude or ())
 
     if include_patterns:
         return any(fnmatch.fnmatch(name, pattern) for pattern in include_patterns)
