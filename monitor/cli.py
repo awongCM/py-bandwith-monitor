@@ -258,6 +258,9 @@ def run_serve(args: argparse.Namespace) -> int:
     from monitor.server import create_app
 
     include, exclude = _interface_filters(args)
+    # Prefer AppConfig from sibling CLI when present; else optional --config path.
+    app_config = getattr(args, "app_config", None)
+    config_path = getattr(args, "config", None)
     app = create_app(
         db_path=args.db,
         interval=args.interval,
@@ -265,6 +268,8 @@ def run_serve(args: argparse.Namespace) -> int:
         include=include,
         exclude=exclude,
         retention_days=args.retention_days,
+        app_config=app_config,
+        config_path=config_path,
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0

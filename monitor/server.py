@@ -11,11 +11,28 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from monitor.alerts import AlertEngine
+from monitor.alerts_settings import AlertSettings
 from monitor.models import AGGREGATE_INTERFACE
+from monitor.notifiers import build_notifiers
 from monitor.service import SamplingService, WebSocketBridge
 from monitor.storage import MetricsDatabase
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def _resolve_app_config(
+    app_config: Any | None,
+    config_path: str | Path | None,
+) -> Any | None:
+    """Use an explicit AppConfig, else load via sibling config module if present."""
+    if app_config is not None:
+        return app_config
+    try:
+        from monitor.config import load_config
+    except ImportError:
+        return None
+    return load_config(config_path)
 
 
 class ConnectionManager:
@@ -51,10 +68,17 @@ def create_app(
     include: tuple[str, ...] = (),
     exclude: tuple[str, ...] = (),
     retention_days: int = 7,
+    alert_settings: AlertSettings | None = None,
+    app_config: Any | None = None,
+    config_path: str | Path | None = None,
 ) -> FastAPI:
     database = MetricsDatabase(db_path)
     bridge = WebSocketBridge()
     manager = ConnectionManager()
+    resolved_config = _resolve_app_config(app_config, config_path)
+    settings = alert_settings or AlertSettings.resolve(app_config=resolved_config)
+    alert_engine = AlertEngine(settings, interval=interval)
+    notifiers = build_notifiers(settings.webhook_url)
     service = SamplingService(
         database,
         interval=interval,
@@ -63,6 +87,9 @@ def create_app(
         exclude=exclude or None,
         retention_days=retention_days,
         on_sample=bridge.publish,
+        alert_engine=alert_engine,
+        notifiers=notifiers,
+        error_delta_threshold=settings.error_delta_threshold,
     )
 
     @asynccontextmanager
@@ -78,6 +105,7 @@ def create_app(
     app.state.database = database
     app.state.service = service
     app.state.manager = manager
+    app.state.alert_settings = settings
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -114,6 +142,24 @@ def create_app(
     @app.get("/api/health")
     async def health(limit: int = 50) -> dict[str, Any]:
         return {"events": database.get_health_events(limit=limit)}
+
+    @app.get("/api/alerts")
+    async def alerts(limit: int = 50) -> dict[str, Any]:
+        return {"events": database.get_alert_events(limit=limit)}
+
+    @app.get("/api/alerts/status")
+    async def alerts_status() -> dict[str, Any]:
+        return {
+            "bandwidth_enabled": settings.bandwidth_enabled,
+            "bandwidth_mbps_threshold": settings.bandwidth_mbps_threshold,
+            "recv_bps_threshold": settings.recv_bps_threshold,
+            "sent_bps_threshold": settings.sent_bps_threshold,
+            "bandwidth_sustained_seconds": settings.bandwidth_sustained_seconds,
+            "error_delta_threshold": settings.error_delta_threshold,
+            "cooldown_seconds": settings.cooldown_seconds,
+            "notifications_enabled": settings.notifications_enabled,
+            "webhook_configured": bool(settings.webhook_url),
+        }
 
     @app.websocket("/ws/live")
     async def live_updates(websocket: WebSocket) -> None:

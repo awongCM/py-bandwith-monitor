@@ -22,7 +22,14 @@ class _InterfaceHealthState:
 class HealthMonitor:
     """Track interface state transitions and rising error/drop counters."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        error_delta_threshold: int = ERROR_DELTA_THRESHOLD,
+        drop_delta_threshold: int = DROP_DELTA_THRESHOLD,
+    ) -> None:
+        self.error_delta_threshold = error_delta_threshold
+        self.drop_delta_threshold = drop_delta_threshold
         self._state: dict[str, _InterfaceHealthState] = {}
 
     def evaluate(
@@ -96,7 +103,7 @@ class HealthMonitor:
         if state.is_up is None:
             return []
 
-        if err_delta >= ERROR_DELTA_THRESHOLD:
+        if err_delta >= self.error_delta_threshold:
             events.append(
                 HealthEvent(
                     timestamp=timestamp,
@@ -111,7 +118,7 @@ class HealthMonitor:
                 )
             )
 
-        if drop_delta >= DROP_DELTA_THRESHOLD:
+        if drop_delta >= self.drop_delta_threshold:
             events.append(
                 HealthEvent(
                     timestamp=timestamp,
