@@ -748,10 +748,25 @@ brew install cloudflared
 Linux packages and other installs:
 [Cloudflare Tunnel client docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
 
-**3. Create a tunnel (CLI)**
+**3. Log in to Cloudflare (required before `tunnel create`)**
+
+This step downloads `~/.cloudflared/cert.pem`. Without it, `tunnel create` fails
+with *"Cannot determine default origin certificate path"*.
 
 ```bash
-cloudflared tunnel login          # opens browser; pick your domain
+cloudflared tunnel login
+```
+
+A browser window opens — sign in to Cloudflare and **authorize a hostname zone**
+(the domain you will use for `eero.example.com`). Confirm the cert exists:
+
+```bash
+ls -l ~/.cloudflared/cert.pem
+```
+
+**4. Create a tunnel (CLI)**
+
+```bash
 cloudflared tunnel create eero-monitor
 ```
 
@@ -784,7 +799,7 @@ Alternatively, use **Zero Trust → Networks → Tunnels → Create a tunnel** i
 dashboard and point the public hostname at `http://127.0.0.1:8081` — equivalent
 to the CLI steps above.
 
-**4. Protect with Cloudflare Access**
+**5. Protect with Cloudflare Access**
 
 In [Zero Trust](https://one.dash.cloudflare.com/):
 
@@ -798,7 +813,7 @@ cellular). You should see Cloudflare login first, then the dashboard. Live
 updates use `WS /ws/live`; Cloudflare Tunnel passes WebSockets through by
 default.
 
-**5. Run on boot (macOS)**
+**6. Run on boot (macOS)**
 
 Install the tunnel as a system service after the config file is correct:
 
