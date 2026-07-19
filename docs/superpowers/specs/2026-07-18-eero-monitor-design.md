@@ -1,13 +1,14 @@
 # Eero Household Monitor — Design Spec
 
-**Date:** 2026-07-18  
+**Date:** 2026-07-18 (addendum 2026-07-19)  
 **Status:** Approved for implementation planning  
 **Repo:** `py-bandwidth-monitor`  
-**Related app:** existing `monitor` (local host interface bandwidth)
+**Related app:** existing `monitor` (local host interface bandwidth; Phases 1–4)  
+**Related specs:** `2026-07-18-phase4-multi-host-agents-design.md` (Implemented; Eero remains separate)
 
 ## 1. Problem
 
-The existing `monitor` package reads kernel counters via `psutil` on the machine where it runs. That is correct for **this host’s** interfaces (`en0`, tunnels, etc.), but it cannot see per-device traffic for other clients on a home mesh.
+The existing `monitor` package reads kernel counters via `psutil` on the machine where it runs (and, as of Phase 4, can ingest the same NIC metrics from other hosts via agents). That is correct for **per-host** interfaces (`en0`, tunnels, etc.), but it cannot see per-device traffic for other clients on a home mesh.
 
 The home network uses an **Amazon Eero 6**. Eero is closed (no SSH, SNMP, or port mirror). Household device lists and instantaneous per-device usage are available through Eero’s **cloud API**, reachable via unofficial community SDKs.
 
@@ -15,7 +16,7 @@ We need a household-device monitor that:
 
 - Lists all known devices (online and offline)
 - Shows live / historical per-device and aggregate rates
-- Exposes CLI + web dashboard (parity with `monitor serve`)
+- Exposes CLI + web dashboard (Phase 2-style parity with `monitor serve`: live rates, history charts, health — not alerts/agents)
 - Does **not** couple into `monitor`, so replacing the router later does not force a rewrite of host interface monitoring
 
 ## 2. Goals
@@ -38,6 +39,8 @@ We need a household-device monitor that:
 - Device pause / block / priority controls via Eero
 - Official Amazon Eero Data Portability partner API
 - Guaranteeing packet-capture accuracy (Eero reports cloud instantaneous usage)
+- YAML config, retention rollups, threshold alerts, or multi-host agent ingest inside `eero_monitor`
+- Sharing a database, port, or process with `monitor` / Phase 4 agents
 
 ## 4. Decisions
 
@@ -49,7 +52,9 @@ We need a household-device monitor that:
 | Package boundary | Fully isolated | Router swap = delete/stop `eero_monitor` only |
 | Auth | Env vars only | Simple, headless-friendly; no secrets in git |
 | Device set | All known (online + offline) | Presence + usage in one table |
-| Architecture | Mirror `monitor` 1:1 | Familiar structure; predictable implementation plan |
+| Architecture | Mirror Phase 2-style `monitor` structure | Familiar layout (CLI/storage/serve/WS); **not** Phase 3/4 feature parity |
+| Delivery style | Greenfield sibling package | Build `eero_monitor/` by reference to patterns; do not copy-adapt `host_id`/alerts/agent code |
+| Validation | Mock-first in CI | No live Eero calls in CI; optional live smoke test after CLI/dashboard exist |
 
 ## 5. Architecture
 
@@ -175,7 +180,7 @@ Aggregate sentinel for history queries (analogous to `monitor`’s `__total__`):
 
 ### 6.5 Storage (`storage.py`)
 
-Mirror `monitor` storage responsibilities with device IDs:
+Mirror Phase 2-style `monitor` storage responsibilities with device IDs (no `host_id`, rollup tables, or alert tables in v1):
 
 - Persist rate samples (aggregate + per-device)
 - Persist latest device snapshots
@@ -210,7 +215,7 @@ Entry: `python -m eero_monitor …`
 
 ### 6.9 Dashboard UI
 
-Parity with host dashboard, device-oriented:
+Phase 2-style parity with the host dashboard, device-oriented:
 
 - Live aggregate up/down + sparkline
 - Device table: name, IP, MAC, online badge, connection, current rates
@@ -303,3 +308,16 @@ These are intentionally deferred to the implementation plan / first PR, not bloc
 - Precise SQLite table DDL  
 - Exact JSON field paths inside SDK responses (confirmed against live fixtures during implementation)  
 - Dashboard CSS polish level (functional parity first)
+
+## 15. Post–Phase 4 confirmation (2026-07-19)
+
+Phase 4 multi-host agents are **Implemented**. This brainstorming pass re-confirmed the Eero track without changing the core architecture:
+
+| Decision | Choice |
+|----------|--------|
+| Isolation vs Phase 4 hub | Keep absolute package/DB/UI/port isolation (sibling app) |
+| v1 feature scope | Stick to this spec: CLI + SQLite + dashboard; no YAML/alerts/agents/rollups |
+| Implementation approach | Greenfield `eero_monitor/` mirroring Phase 2-style patterns |
+| Live network validation | Mock-first; operator-supplied `EERO_SESSION` / `EERO_NETWORK_ID` for a later smoke check |
+
+Phase 4 agents answer “bandwidth on each Python host’s NICs.” This app answers “per-device household usage as reported by Eero.” They remain complementary, not merged.
