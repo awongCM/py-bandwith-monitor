@@ -642,8 +642,12 @@ python -m eero_monitor serve
 
 Dashboard defaults to [http://127.0.0.1:8081](http://127.0.0.1:8081)
 (host `monitor` stays on `8080`). SQLite history defaults to `eero_monitor.db`
-with 7-day retention. Poll interval defaults to 5 seconds. Rates are
-**router-reported instantaneous** values from Eero, not kernel-counter deltas.
+with 7-day retention. Poll interval defaults to 5 seconds. Per-device rates use
+Eero's live `usage.down_mbps` / `usage.up_mbps` fields when present; otherwise
+they are estimated from today's `data_usage` byte totals (delta between polls).
+The first sample after startup is always 0 bps while counters are primed. Some
+networks report zeros on the live fields — leave a device actively downloading
+for one to two minutes to see `data_usage`-derived rates appear.
 
 ---
 
