@@ -173,11 +173,27 @@ def run_watch(args: argparse.Namespace) -> int:
 
 
 def run_serve(args: argparse.Namespace) -> int:
-    print(
-        "serve is not available yet (dashboard arrives in a later task).",
-        file=sys.stderr,
+    try:
+        import uvicorn
+    except ImportError as exc:
+        print(
+            "uvicorn is required for serve. Install with: pip install -r requirements-eero.txt",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
+
+    from eero_monitor.server import create_app
+
+    # Fail fast on missing credentials before binding the port.
+    load_credentials()
+    app = create_app(
+        db_path=args.db,
+        interval=args.interval,
+        history_size=args.history_size,
+        retention_days=args.retention_days,
     )
-    return 2
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
