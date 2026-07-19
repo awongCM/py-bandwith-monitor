@@ -600,7 +600,12 @@ currently needs **Python 3.12+**.
 
 ### Install
 
+`eero-api` requires **Python 3.12+** (this repo’s default pyenv 3.11 cannot install it).
+Use a separate venv, for example with Homebrew Python 3.13:
+
 ```bash
+/opt/homebrew/bin/python3.13 -m venv .venv-eero
+source .venv-eero/bin/activate
 pip install -r requirements-eero.txt
 ```
 
