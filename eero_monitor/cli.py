@@ -168,15 +168,15 @@ def run_login(args: argparse.Namespace) -> int:
 
 
 def run_devices(args: argparse.Namespace) -> int:
-    ensure_eero_sdk()
     client = _build_client()
+    ensure_eero_sdk()
     print_devices(client.list_device_samples(), as_json=args.json)
     return 0
 
 
 def run_watch(args: argparse.Namespace) -> int:
-    ensure_eero_sdk()
     client = _build_client()
+    ensure_eero_sdk()
     collector = DeviceCollector(client, interval=args.interval)
     stop_requested = False
 
