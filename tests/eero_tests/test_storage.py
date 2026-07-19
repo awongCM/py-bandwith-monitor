@@ -92,6 +92,19 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["recv_bps"], 2.0)
 
+    def test_clear_api_health_events(self) -> None:
+        self.db.insert_health_event(
+            HealthEvent(1.0, "__api__", "api_error", "warning", "boom")
+        )
+        self.db.insert_health_event(
+            HealthEvent(2.0, "a", "offline", "warning", "gone")
+        )
+        removed = self.db.clear_api_health_events()
+        self.assertEqual(removed, 1)
+        events = self.db.get_health_events(limit=10)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "offline")
+
 
 if __name__ == "__main__":
     unittest.main()

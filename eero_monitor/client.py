@@ -3,9 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import Any, Protocol
 
 from eero_monitor.models import DeviceSnapshot
+
+_EERO_SDK_HELP = (
+    "eero-api is required for live Eero access. "
+    "Install with: pip install -r requirements-eero.txt (Python 3.12+). "
+    "Use the same interpreter for login and serve, e.g. "
+    "source .venv-eero/bin/activate && python -m eero_monitor login"
+)
+
+
+def ensure_eero_sdk() -> None:
+    """Fail fast when the current interpreter cannot import ``eero-api``."""
+    try:
+        import eero  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            f"{_EERO_SDK_HELP}\nCurrent interpreter: {sys.executable}"
+        ) from exc
 
 
 class DeviceTransport(Protocol):
@@ -45,11 +63,7 @@ class EeroClient:
         try:
             from eero import EeroClient as SdkClient
         except ImportError as exc:  # pragma: no cover - exercised live only
-            raise RuntimeError(
-                "eero-api is required for live Eero access. "
-                "Install with: pip install -r requirements-eero.txt "
-                "(Python 3.12+). Run: python -m eero_monitor login"
-            ) from exc
+            raise RuntimeError(_EERO_SDK_HELP) from exc
 
         async def _load() -> list[dict[str, Any]]:
             async with SdkClient() as client:

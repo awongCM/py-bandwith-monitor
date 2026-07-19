@@ -10,6 +10,7 @@ from typing import Any
 
 from eero_monitor.models import (
     AGGREGATE_DEVICE,
+    API_DEVICE_ID,
     AggregateDeviceRates,
     DeviceSnapshot,
     HealthEvent,
@@ -250,6 +251,20 @@ class MetricsDatabase:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def clear_api_health_events(self) -> int:
+        """Remove persisted API/auth errors after a successful sample."""
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                DELETE FROM health_events
+                WHERE device_id = ?
+                  AND event_type IN ('api_error', 'auth_error')
+                """,
+                (API_DEVICE_ID,),
+            )
+            self._conn.commit()
+            return int(cur.rowcount or 0)
 
     def get_overview(self, *, minutes: float = 5) -> dict[str, Any]:
         latest = self.get_latest_rates()

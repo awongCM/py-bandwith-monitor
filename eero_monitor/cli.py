@@ -10,7 +10,7 @@ from typing import Sequence
 
 from eero_monitor import __version__
 from eero_monitor.auth import AuthError, load_credentials
-from eero_monitor.client import EeroClient
+from eero_monitor.client import EeroClient, ensure_eero_sdk
 from eero_monitor.collector import DeviceCollector
 from eero_monitor.formatting import rate2human
 from eero_monitor.login_flow import LoginError
@@ -168,12 +168,14 @@ def run_login(args: argparse.Namespace) -> int:
 
 
 def run_devices(args: argparse.Namespace) -> int:
+    ensure_eero_sdk()
     client = _build_client()
     print_devices(client.list_device_samples(), as_json=args.json)
     return 0
 
 
 def run_watch(args: argparse.Namespace) -> int:
+    ensure_eero_sdk()
     client = _build_client()
     collector = DeviceCollector(client, interval=args.interval)
     stop_requested = False
@@ -222,8 +224,9 @@ def run_serve(args: argparse.Namespace) -> int:
 
     from eero_monitor.server import create_app
 
-    # Fail fast on missing credentials before binding the port.
+    # Fail fast on missing credentials or SDK before binding the port.
     load_credentials()
+    ensure_eero_sdk()
     app = create_app(
         db_path=args.db,
         interval=args.interval,

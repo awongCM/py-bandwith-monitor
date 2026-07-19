@@ -45,6 +45,7 @@ class SamplingService:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._samples_since_maintenance = 0
+        self._last_sample_failed = False
 
     @property
     def is_running(self) -> bool:
@@ -95,7 +96,12 @@ class SamplingService:
                         "error": message,
                     }
                 )
+            self._last_sample_failed = True
             return
+
+        if self._last_sample_failed:
+            self.database.clear_api_health_events()
+            self._last_sample_failed = False
 
         self.database.insert_rates(aggregate)
         if snapshots:
