@@ -1,0 +1,6 @@
+# Optional deps for eero_monitor (household devices via unofficial Eero API).
+# Live eero-api SDK requires Python 3.12+.
+eero-api>=5,<6
+fastapi>=0.110,<1
+uvicorn[standard]>=0.27,<1
+httpx>=0.27,<1

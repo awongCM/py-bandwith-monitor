@@ -1,7 +1,7 @@
 # Eero Household Monitor — Design Spec
 
 **Date:** 2026-07-18 (addendum 2026-07-19)  
-**Status:** Approved for implementation planning  
+**Status:** Implementation complete (pending merge of `feature/eero-household-monitor`)  
 **Repo:** `py-bandwidth-monitor`  
 **Related app:** existing `monitor` (local host interface bandwidth; Phases 1–4)  
 **Related specs:** `2026-07-18-phase4-multi-host-agents-design.md` (Implemented; Eero remains separate)
@@ -33,7 +33,7 @@ We need a household-device monitor that:
 
 ## 3. Non-goals (v1)
 
-- Interactive `login` command, keyring, or OAuth UI
+- Full OAuth UI or keyring-managed auto-refresh (v1 includes a one-time `login` CLI that prints env export lines)
 - Merging host `monitor` and Eero dashboards into one UI
 - ARP scanning or packet capture for per-device bytes
 - Device pause / block / priority controls via Eero

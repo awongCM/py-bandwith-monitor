@@ -84,6 +84,7 @@ celerybeat-schedule
 # Environments
 .env
 .venv
+.venv-eero
 env/
 venv/
 ENV/
@@ -105,6 +106,7 @@ venv.bak/
 
 # Local monitor database
 monitor.db
+eero_monitor.db
 *.db-journal
 
 # Git worktrees used for parallel development

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Eero Household Monitor</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <h1>Eero Household Monitor</h1>
+        <p class="subtitle">Household device usage via Eero (not this machine’s NICs)</p>
+      </div>
+      <div class="header-status">
+        <div id="connection-status" class="status-pill status-connecting">
+          Connecting…
+        </div>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Live Overview</h2>
+          <p>Aggregate upload and download across known household devices</p>
+        </div>
+        <div class="stat-grid">
+          <article class="stat-card">
+            <span class="stat-label">Download</span>
+            <strong id="download-rate" class="stat-value">—</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Upload</span>
+            <strong id="upload-rate" class="stat-value">—</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Combined</span>
+            <strong id="combined-rate" class="stat-value">—</strong>
+          </article>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="overview-sparkline" aria-label="Overview sparkline"></canvas>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header panel-header-row">
+          <div>
+            <h2>Per Device</h2>
+            <p id="device-chart-subtitle">Upload and download over time</p>
+          </div>
+          <div class="controls">
+            <label>
+              Device
+              <select id="device-select"></select>
+            </label>
+            <div class="button-group" id="range-buttons">
+              <button type="button" data-minutes="5" class="active">5 min</button>
+              <button type="button" data-minutes="15">15 min</button>
+              <button type="button" data-minutes="60">60 min</button>
+            </div>
+          </div>
+        </div>
+        <div class="chart-wrap chart-wrap-large">
+          <canvas id="device-chart" aria-label="Per-device chart"></canvas>
+        </div>
+      </section>
+
+      <section class="panel split-panel">
+        <div>
+          <div class="panel-header">
+            <h2>Devices</h2>
+            <p>Presence and current instantaneous rates from Eero</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Connection</th>
+                  <th>IP</th>
+                  <th>MAC</th>
+                  <th>Download</th>
+                  <th>Upload</th>
+                </tr>
+              </thead>
+              <tbody id="device-table-body">
+                <tr>
+                  <td colspan="7" class="empty-row">Waiting for data…</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div>
+          <div class="panel-header">
+            <h2>Health</h2>
+            <p>Online/offline and API/auth events</p>
+          </div>
+          <ul id="health-list" class="health-list">
+            <li class="empty-row">No health events yet.</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
