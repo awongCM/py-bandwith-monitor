@@ -41,7 +41,7 @@
 | `eero_monitor/cli.py` | `devices` / `watch` / `serve` |
 | `eero_monitor/static/*` | Dashboard HTML/JS/CSS |
 | `requirements-eero.txt` | Optional deps |
-| `tests/eero_monitor/*` | Isolated tests |
+| `tests/eero_tests/*` | Isolated tests (named to avoid shadowing `eero_monitor`) |
 | `README.md` | Optional Eero section |
 
 ---

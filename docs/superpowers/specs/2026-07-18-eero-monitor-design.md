@@ -1,7 +1,7 @@
 # Eero Household Monitor — Design Spec
 
 **Date:** 2026-07-18 (addendum 2026-07-19)  
-**Status:** Approved for implementation planning  
+**Status:** Implementation complete (pending merge of `feature/eero-household-monitor`)  
 **Repo:** `py-bandwidth-monitor`  
 **Related app:** existing `monitor` (local host interface bandwidth; Phases 1–4)  
 **Related specs:** `2026-07-18-phase4-multi-host-agents-design.md` (Implemented; Eero remains separate)

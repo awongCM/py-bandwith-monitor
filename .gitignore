@@ -105,6 +105,7 @@ venv.bak/
 
 # Local monitor database
 monitor.db
+eero_monitor.db
 *.db-journal
 
 # Git worktrees used for parallel development

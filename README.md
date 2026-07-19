@@ -215,14 +215,14 @@ pkill -f "monitor serve"
 | NICs on the hub and agent hosts | Devices without a running agent (phones/TVs unless an agent runs there) |
 | Cumulative kernel counters since boot | Per-process or per-connection usage |
 | Aggregate or per-interface upload/download rates | Router QoS, ISP usage caps, WAN-only traffic |
-| Local interface up/down and link speed | Router/Eero household views (deferred; separate spec) |
+| Local interface up/down and link speed | Per-process or WAN ISP billing views |
 
 **Original intent:** a small home utility to inspect bandwidth on the local
 machine — interface metadata, cumulative I/O, and live transfer rates.
 
 **Phase 4 adds:** lightweight agents that report the same NIC rates to a central
-hub. Router APIs, SNMP, packet capture, and Eero cloud monitoring remain out of
-scope for now.
+hub. Optional household-device monitoring via Eero is a separate sibling app —
+see [Optional: Eero household monitor](#optional-eero-household-monitor).
 
 ---
 
@@ -234,6 +234,7 @@ scope for now.
 | **Phase 2** | Done | SQLite storage, FastAPI server, Chart.js dashboard |
 | **Phase 3** | Done | Config, retention rollups, alerts/webhook, Docker/systemd, integration tests |
 | **Phase 4** | Done | Multi-host agents (per-device NIC rates → central hub) |
+| **Eero monitor** | Optional | Sibling `eero_monitor` app for household devices via Eero cloud API |
 
 ---
 
@@ -567,18 +568,67 @@ still open. Do not expose the hub publicly without a reverse proxy (and ideally
 auth) in front. Anyone with the shared token can post under any `host_id`
 (including `local`), so treat the token like a household secret.
 
-**Still future / deferred:** router APIs, SNMP, mirror-port collectors, and
-Eero/router household monitoring remain separate options — see
-`docs/superpowers/specs/2026-07-18-eero-monitor-design.md` (deferred).
+**Household devices (Eero):** optional sibling package — see
+[Optional: Eero household monitor](#optional-eero-household-monitor) and
+`docs/superpowers/specs/2026-07-18-eero-monitor-design.md`.
+
+**Still future / deferred for the host `monitor` hub:** router APIs (non-Eero),
+SNMP, and mirror-port collectors.
 
 **Approach options**
 
 | Approach | Effort | Status | What you get |
 |----------|--------|--------|--------------|
 | Agent on each device | Medium | **Implemented** | Accurate per-machine stats, reports to central dashboard |
+| Eero cloud API (`eero_monitor`) | Medium | **Optional** | Household per-device rates via unofficial Eero API |
 | Router API (UniFi, OpenWrt, pfSense) | Medium | Future | Per-device traffic if the router exposes it |
 | SNMP from router | Medium | Future | WAN/LAN totals, sometimes per-port |
 | Mirror port + flow collector (ntopng) | High | Future | Full LAN visibility |
+
+---
+
+## Optional: Eero household monitor
+
+Separate sibling package for **household device** lists and instantaneous
+per-device rates reported by an Amazon Eero mesh via the unofficial cloud API.
+It does **not** import or share a database with `monitor`. Replacing your router
+later means stopping/removing `eero_monitor` only — keep `monitor` as-is.
+
+**Disclaimer:** this uses an unofficial community SDK (`eero-api`). It may break
+if Eero changes their API. It is not affiliated with Amazon/Eero. Live SDK use
+currently needs **Python 3.12+**.
+
+### Install
+
+```bash
+pip install -r requirements-eero.txt
+```
+
+### Credentials
+
+Set both environment variables (no interactive login in v1):
+
+```bash
+export EERO_SESSION="..."       # session cookie/token usable by the SDK
+export EERO_NETWORK_ID="..."    # target Eero network id
+```
+
+How you obtain these depends on the community SDK login flow (often a one-time
+email/password login that yields a session cookie). Amazon-only login accounts
+may need a secondary admin with email/password — see the SDK docs.
+
+### Commands
+
+```bash
+python -m eero_monitor devices
+python -m eero_monitor watch
+python -m eero_monitor serve
+```
+
+Dashboard defaults to [http://127.0.0.1:8081](http://127.0.0.1:8081)
+(host `monitor` stays on `8080`). SQLite history defaults to `eero_monitor.db`
+with 7-day retention. Poll interval defaults to 5 seconds. Rates are
+**router-reported instantaneous** values from Eero, not kernel-counter deltas.
 
 ---
 
@@ -605,6 +655,13 @@ monitor/
     index.html     # dashboard page
     app.js         # Chart.js + WebSocket client
     styles.css     # dashboard styles
+eero_monitor/      # optional household monitor (isolated)
+  cli.py           # devices, watch, serve
+  client.py        # unofficial Eero SDK wrapper
+  collector.py
+  storage.py
+  server.py
+  static/
 tests/
   test_monitor.py
   test_config.py
@@ -616,6 +673,7 @@ tests/
   test_ingest.py
   test_agent_client.py
   test_integration.py
+  eero_tests/      # isolated eero_monitor tests
 deploy/
   systemd/
     bandwidth-monitor.service
@@ -626,7 +684,9 @@ config.example.yaml
 config.yaml        # local override (gitignored; not committed)
 requirements.txt
 requirements.lock  # pinned transitive deps
+requirements-eero.txt  # optional eero_monitor deps
 monitor.db         # created at runtime (gitignored)
+eero_monitor.db    # created at runtime (gitignored)
 ```
 
 
