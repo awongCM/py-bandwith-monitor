@@ -38,6 +38,55 @@ source .venv/bin/activate   # macOS / Linux
 pip install -r requirements.txt
 ```
 
+## Secrets and local config (public repo)
+
+This repository is intended to be **public**. Nothing in git should contain
+real credentials, tokens, or session cookies.
+
+**Safe to commit (already in the repo)**
+
+| File | Purpose |
+|------|---------|
+| `config.example.yaml` | Template with `null` placeholders — copy locally |
+| `.env.example` | Template env var names — copy to `.env` locally |
+| `README.md` | Uses `...` / `example.com` placeholders only |
+
+**Never commit (gitignored)**
+
+| Path / variable | What it is |
+|-----------------|------------|
+| `.env`, `.env.local`, … | Local env files with real values |
+| `config.yaml` | Your edited config (agent token, webhook URL, etc.) |
+| `monitor.db`, `eero_monitor.db` | Runtime SQLite (may embed operational data) |
+| `~/.cloudflared/*.json` | Cloudflare tunnel credentials (keep under your home dir) |
+| `EERO_SESSION`, `EERO_NETWORK_ID` | Eero API session — env vars only |
+| `MONITOR_AGENT_TOKEN` | Agent ingest bearer token — env or local `config.yaml` |
+
+**Recommended workflow**
+
+```bash
+cp config.example.yaml config.yaml    # main monitor (optional)
+cp .env.example .env                  # Eero + env-based secrets (optional)
+# edit both locally; never git add them
+```
+
+Load env vars before running Eero commands:
+
+```bash
+set -a && source .env && set +a
+python -m eero_monitor serve
+```
+
+For `launchd` or systemd, put secrets in the unit's `Environment=` /
+`EnvironmentFile=` pointing at a file **outside** the repo (e.g.
+`/etc/bandwidth-monitor/env` or `~/Library/LaunchAgents/secrets.env`).
+
+**Before pushing:** run `git status` and confirm no `.env`, `config.yaml`, or
+`*.db` files are staged. If a secret was ever committed, rotate it immediately
+(Eero: `python -m eero_monitor login`; agent token: generate a new random
+string) — removing it from git history requires a force-push and does not
+revoke a leaked token.
+
 ## Usage
 
 Take a one-shot snapshot of monitored interfaces:
@@ -625,8 +674,10 @@ export EERO_SESSION=...
 export EERO_NETWORK_ID=...
 ```
 
-Paste/run those in your shell (or add them to a local env file that is not
-committed). Amazon-only “Sign in with Amazon” accounts often cannot use this
+Paste/run those in your shell, or copy `.env.example` → `.env`, fill in the
+values, and `set -a && source .env && set +a` before running commands (see
+[Secrets and local config](#secrets-and-local-config-public-repo)). Amazon-only
+“Sign in with Amazon” accounts often cannot use this
 API directly — invite a secondary admin with email/password in the Eero app,
 then login with that account. See the
 [eero-api troubleshooting wiki](https://github.com/fulviofreitas/eero-api/wiki/Troubleshooting).
@@ -648,6 +699,133 @@ they are estimated from today's `data_usage` byte totals (delta between polls).
 The first sample after startup is always 0 bps while counters are primed. Some
 networks report zeros on the live fields — leave a device actively downloading
 for one to two minutes to see `data_usage`-derived rates appear.
+
+### Private access (Cloudflare Tunnel + Access)
+
+Expose the dashboard to phones and laptops **without** opening router ports or
+deploying to a public cloud host. Traffic goes out from your Mac (or home
+server) through an outbound tunnel; **Cloudflare Access** prompts for email +
+one-time PIN before anyone reaches the app.
+
+The dashboard and `/api/*` endpoints have **no built-in auth** — treat Access as
+required, not optional. Add family members by email in Access policies as you
+go; they only need a browser (no VPN app).
+
+**Prerequisites**
+
+- A domain on Cloudflare (transfer an existing domain or register one there).
+- [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) (free plan is enough
+  for a household).
+- `eero_monitor serve` working locally with `EERO_SESSION` and `EERO_NETWORK_ID`
+  set (see [Credentials](#credentials) above).
+- The host running `serve` should stay awake (Mac, Pi, or NAS). Eero login
+  (`python -m eero_monitor login`) still runs on that machine when the session
+  expires — family members only view the dashboard.
+
+**1. Run the dashboard locally (loopback only)**
+
+Keep the default bind address so the app is not reachable from your LAN without
+the tunnel:
+
+```bash
+source .venv-eero/bin/activate   # or your eero venv
+export EERO_SESSION=...
+export EERO_NETWORK_ID=...
+python -m eero_monitor serve
+# listens on http://127.0.0.1:8081
+```
+
+Confirm [http://127.0.0.1:8081](http://127.0.0.1:8081) works before continuing.
+
+**2. Install `cloudflared`**
+
+macOS (Homebrew):
+
+```bash
+brew install cloudflared
+```
+
+Linux packages and other installs:
+[Cloudflare Tunnel client docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+
+**3. Create a tunnel (CLI)**
+
+```bash
+cloudflared tunnel login          # opens browser; pick your domain
+cloudflared tunnel create eero-monitor
+```
+
+Note the tunnel UUID printed by `create`. Create a config file (paths vary by OS;
+`~/.cloudflared/config.yml` is typical):
+
+```yaml
+tunnel: <TUNNEL-UUID>
+credentials-file: /Users/you/.cloudflared/<TUNNEL-UUID>.json
+
+ingress:
+  - hostname: eero.example.com
+    service: http://127.0.0.1:8081
+  - service: http_status:404
+```
+
+Route DNS to the tunnel (replace hostname as needed):
+
+```bash
+cloudflared tunnel route dns eero-monitor eero.example.com
+```
+
+Run the tunnel (foreground test):
+
+```bash
+cloudflared tunnel run eero-monitor
+```
+
+Alternatively, use **Zero Trust → Networks → Tunnels → Create a tunnel** in the
+dashboard and point the public hostname at `http://127.0.0.1:8081` — equivalent
+to the CLI steps above.
+
+**4. Protect with Cloudflare Access**
+
+In [Zero Trust](https://one.dash.cloudflare.com/):
+
+1. **Access → Applications → Add an application → Self-hosted**
+2. **Application domain:** `eero.example.com` (same hostname as the tunnel)
+3. **Policy:** e.g. *Allow* → *Emails* → your address; add family emails later
+4. **Authentication:** One-time PIN (simple for household phones/laptops)
+
+Save, then open `https://eero.example.com` from another network (phone on
+cellular). You should see Cloudflare login first, then the dashboard. Live
+updates use `WS /ws/live`; Cloudflare Tunnel passes WebSockets through by
+default.
+
+**5. Run on boot (macOS)**
+
+Install the tunnel as a system service after the config file is correct:
+
+```bash
+sudo cloudflared service install
+sudo cloudflared service start
+```
+
+Keep `eero_monitor serve` running too — e.g. a `launchd` job, `tmux`, or
+`caffeinate` (see [Always-on Mac](#always-on-mac) for the main `monitor` app;
+same idea, but use `python -m eero_monitor serve` and port `8081`).
+
+**Security notes**
+
+| Topic | Guidance |
+|-------|----------|
+| Access policies | Do not publish the hostname without an Access policy |
+| `EERO_SESSION` | Stays on the host only (`.env` or shell); never commit or paste into Cloudflare |
+| Tunnel creds | `~/.cloudflared/<uuid>.json` lives outside the repo by default |
+| Public git | Only `config.example.yaml` and `.env.example` belong in the repo — never real values |
+| Session expiry | Re-run `python -m eero_monitor login` locally and update env vars |
+| LAN binding | Prefer default `127.0.0.1`; only the tunnel needs to reach the port |
+
+**Why not Render?** `eero_monitor` calls the Eero cloud API, so it *can* run
+remotely, but a public URL without Access would expose household device names
+and usage. Running locally behind Cloudflare keeps SQLite history on your
+machine and makes credential refresh straightforward.
 
 ---
 

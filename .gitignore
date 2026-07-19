@@ -81,8 +81,10 @@ celerybeat-schedule
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments and local secrets (safe to commit: .env.example only)
 .env
+.env.*
+!.env.example
 .venv
 .venv-eero
 env/
@@ -114,3 +116,10 @@ worktrees/
 
 # Local runtime config (copy from config.example.yaml)
 config.yaml
+config.local.yaml
+secrets.yaml
+
+# Cloudflare tunnel credentials if stored inside the repo by mistake
+.cloudflared/
+*_credentials.json
+*.credentials.json
