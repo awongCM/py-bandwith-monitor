@@ -19,11 +19,14 @@ class DeviceCollector:
     def __init__(self, client: SampleClient, *, interval: float = 5.0) -> None:
         self.client = client
         self.interval = interval
+        self.last_snapshots: tuple[DeviceSnapshot, ...] = ()
 
     def sample(self) -> AggregateDeviceRates:
         timestamp = time.time()
         device_rates: list[DeviceRates] = []
+        snapshots: list[DeviceSnapshot] = []
         for snapshot, recv_bps, sent_bps in self.client.list_device_samples():
+            snapshots.append(snapshot)
             device_rates.append(
                 DeviceRates(
                     device_id=snapshot.device_id,
@@ -34,6 +37,7 @@ class DeviceCollector:
                     is_online=snapshot.is_online,
                 )
             )
+        self.last_snapshots = tuple(snapshots)
         return AggregateDeviceRates(
             timestamp=timestamp,
             recv_bps=sum(item.recv_bps for item in device_rates),
