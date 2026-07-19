@@ -13,6 +13,7 @@ from eero_monitor.auth import AuthError, load_credentials
 from eero_monitor.client import EeroClient
 from eero_monitor.collector import DeviceCollector
 from eero_monitor.formatting import rate2human
+from eero_monitor.login_flow import LoginError
 from eero_monitor.models import AggregateDeviceRates, DeviceSnapshot
 
 
@@ -27,6 +28,16 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    login_parser = subparsers.add_parser(
+        "login",
+        help="One-time Eero login; print export lines for EERO_SESSION / EERO_NETWORK_ID.",
+    )
+    login_parser.add_argument(
+        "--user",
+        metavar="EMAIL_OR_PHONE",
+        help="Eero account email or phone (prompted if omitted).",
+    )
 
     devices_parser = subparsers.add_parser(
         "devices",
@@ -129,6 +140,33 @@ def print_watch_sample(sample: AggregateDeviceRates) -> None:
         )
 
 
+def run_login(args: argparse.Namespace) -> int:
+    from eero_monitor.login_flow import run_login_flow
+
+    user = (args.user or "").strip()
+    if not user:
+        try:
+            user = input("Eero email or phone: ").strip()
+        except EOFError as exc:
+            raise LoginError("Email or phone is required (pass --user).") from exc
+    if not user:
+        raise LoginError("Email or phone is required (pass --user).")
+
+    def read_code() -> str:
+        try:
+            return input("Verification code: ")
+        except EOFError as exc:
+            raise LoginError("Verification code is required.") from exc
+
+    if sys.stderr.isatty():
+        print(
+            "Logging in via unofficial eero-api. "
+            "Amazon-only accounts need a secondary email/password admin.",
+            file=sys.stderr,
+        )
+    return run_login_flow(user_identifier=user, read_code=read_code)
+
+
 def run_devices(args: argparse.Namespace) -> int:
     client = _build_client()
     print_devices(client.list_device_samples(), as_json=args.json)
@@ -200,16 +238,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     handlers = {
+        "login": run_login,
         "devices": run_devices,
         "watch": run_watch,
         "serve": run_serve,
     }
     try:
         return handlers[args.command](args)
-    except AuthError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    except RuntimeError as exc:
+    except (AuthError, LoginError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 

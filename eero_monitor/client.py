@@ -43,36 +43,26 @@ class EeroClient:
 
     def _fetch_via_sdk(self) -> list[dict[str, Any]]:
         try:
-            from eero import Eero
-            from eero.session import FileSessionStorage
+            from eero import EeroClient as SdkClient
         except ImportError as exc:  # pragma: no cover - exercised live only
             raise RuntimeError(
                 "eero-api is required for live Eero access. "
-                "Install with: pip install -r requirements-eero.txt"
+                "Install with: pip install -r requirements-eero.txt "
+                "(Python 3.12+). Run: python -m eero_monitor login"
             ) from exc
 
-        # FileSessionStorage is unused; we inject the cookie via session cookie.
-        # Prefer a minimal account session object if the installed SDK exposes one.
-        storage = FileSessionStorage("/dev/null")
-        api = Eero(session=storage)
-        # Many community SDKs expect cookie on the session; set if attribute exists.
-        cookie_jar = getattr(api, "session", None)
-        if cookie_jar is not None and hasattr(cookie_jar, "cookie"):
-            cookie_jar.cookie = self.session
+        async def _load() -> list[dict[str, Any]]:
+            async with SdkClient() as client:
+                await client.set_session_token(self.session)
+                response = await client.get_devices(network_id=self.network_id)
+            data = response.get("data", response) if isinstance(response, dict) else response
+            if isinstance(data, dict):
+                data = data.get("devices") or data.get("data") or []
+            if not isinstance(data, list):
+                return []
+            return [_normalize_sdk_device(item) for item in data]
 
-        devices = _call_maybe_async(api.devices, self.network_id)
-        if devices is None:
-            return []
-        if isinstance(devices, dict):
-            devices = devices.get("data") or devices.get("devices") or []
-        return [_normalize_sdk_device(item) for item in devices]
-
-
-def _call_maybe_async(func: Any, *args: Any) -> Any:
-    result = func(*args)
-    if asyncio.iscoroutine(result):
-        return asyncio.run(result)
-    return result
+        return asyncio.run(_load())
 
 
 def _normalize_sdk_device(item: Any) -> dict[str, Any]:

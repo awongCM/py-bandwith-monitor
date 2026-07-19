@@ -33,7 +33,7 @@ We need a household-device monitor that:
 
 ## 3. Non-goals (v1)
 
-- Interactive `login` command, keyring, or OAuth UI
+- Full OAuth UI or keyring-managed auto-refresh (v1 includes a one-time `login` CLI that prints env export lines)
 - Merging host `monitor` and Eero dashboards into one UI
 - ARP scanning or packet capture for per-device bytes
 - Device pause / block / priority controls via Eero

@@ -606,20 +606,30 @@ pip install -r requirements-eero.txt
 
 ### Credentials
 
-Set both environment variables (no interactive login in v1):
+Obtain a session once with the built-in login helper (uses unofficial `eero-api`):
 
 ```bash
-export EERO_SESSION="..."       # session cookie/token usable by the SDK
-export EERO_NETWORK_ID="..."    # target Eero network id
+python -m eero_monitor login --user you@example.com
+# enter the verification code from email/SMS when prompted
 ```
 
-How you obtain these depends on the community SDK login flow (often a one-time
-email/password login that yields a session cookie). Amazon-only login accounts
-may need a secondary admin with email/password — see the SDK docs.
+The command prints shell export lines:
+
+```bash
+export EERO_SESSION=...
+export EERO_NETWORK_ID=...
+```
+
+Paste/run those in your shell (or add them to a local env file that is not
+committed). Amazon-only “Sign in with Amazon” accounts often cannot use this
+API directly — invite a secondary admin with email/password in the Eero app,
+then login with that account. See the
+[eero-api troubleshooting wiki](https://github.com/fulviofreitas/eero-api/wiki/Troubleshooting).
 
 ### Commands
 
 ```bash
+python -m eero_monitor login
 python -m eero_monitor devices
 python -m eero_monitor watch
 python -m eero_monitor serve
