@@ -12,7 +12,7 @@ See [Secrets](secrets.md) before copying credentials.
 
 ```bash
 python3.12 -m venv .venv-eero          # macOS: /opt/homebrew/bin/python3.13 -m venv .venv-eero
-source .venv-eero/bin/activate         # Windows: .\.venv-eero\Scripts\Activate.ps1
+source .venv-eero/bin/activate         # Windows cmd: .\.venv-eero\Scripts\activate.bat
 pip install -r requirements-eero.txt
 ```
 
@@ -24,14 +24,18 @@ One-time login:
 python -m eero_monitor login --user you@example.com
 ```
 
-Copy the printed exports into `.env` (from `.env.example`), then:
+Copy the printed values into `.env` (from `.env.example`). On macOS/Linux:
 
 ```bash
 set -a && source .env && set +a
 ```
 
+On Windows, put `EERO_SESSION=...` and `EERO_NETWORK_ID=...` in `.env` directly
+(cmd does not support bash `export` — see [Troubleshooting](#troubleshooting)).
+
 Amazon-only accounts often need a secondary email/password admin in the Eero app.
-[Troubleshooting wiki](https://github.com/fulviofreitas/eero-api/wiki/Troubleshooting).
+Login issues (especially session errors on Windows): [Troubleshooting](#troubleshooting).
+Upstream SDK notes: [eero-api wiki](https://github.com/fulviofreitas/eero-api/wiki/Troubleshooting).
 
 ## Commands
 
@@ -136,18 +140,22 @@ origin host changes.
 | Tailscale | No | Tailscale app |
 | Cloud VPS / Render | Optional | + monthly cost |
 
-**Setup**
+**Setup** (Command Prompt — also works from PowerShell)
 
-```powershell
+```cmd
 winget install Python.Python.3.12
 git clone https://github.com/andywongcheeming/py-bandwith-monitor.git
 cd py-bandwith-monitor
 py -3.12 -m venv .venv-eero
-.\.venv-eero\Scripts\Activate.ps1
+.\.venv-eero\Scripts\activate.bat
 pip install -r requirements-eero.txt
-# copy .env from Mac or run login
+REM copy .env from Mac or run login (see Troubleshooting)
 powershell -ExecutionPolicy Bypass -File deploy\windows\serve.ps1
 ```
+
+`serve.ps1` loads `.env` and starts `serve`; you can invoke it from cmd as shown
+above. To run `serve` directly in cmd, activate the venv and ensure `EERO_*` are
+set (e.g. via `.env` loaded manually or copied from Mac).
 
 **Move tunnel from Mac**
 
@@ -158,6 +166,81 @@ powershell -ExecutionPolicy Bypass -File deploy\windows\serve.ps1
 
 **Auto-start:** Task Scheduler runs `deploy\windows\serve.ps1`; admin PowerShell:
 `cloudflared service install`. Disable Windows sleep on AC power.
+
+## Troubleshooting
+
+### Login session errors on Windows
+
+`eero-api` auto-saves sessions to the OS keyring (Windows Credential Manager on
+PC, macOS Keychain on Mac). On Windows, stale or partial entries are the most
+common cause of session/auth errors during `python -m eero_monitor login` — often
+while the same command works reliably on a Mac.
+
+**Symptoms:** errors mentioning session tokens, `401`, or auth failures; login
+may skip the `Verification code:` prompt entirely if Credential Manager holds an
+old session that looks valid locally but is rejected by Eero's API.
+
+**Fix — clear stale credentials, then retry login:**
+
+1. **Credential Manager (GUI):** Control Panel → Credential Manager → Windows
+   Credentials → remove any entry named `eero-api` (account `auth-tokens`).
+2. **Or from Python** (venv activated) — save as `clear_eero_auth.py` and run
+   `python clear_eero_auth.py`:
+
+```python
+import asyncio
+from eero import EeroClient
+
+async def main() -> None:
+    async with EeroClient() as client:
+        await client._api.auth.clear_auth_data()
+    print("Cleared eero-api credentials")
+
+asyncio.run(main())
+```
+
+Then run login again. You should see the `Verification code:` prompt.
+
+**Easiest workaround for a Windows always-on host:** log in once on your Mac (or
+where login works), copy `.env` to the Windows repo root, and use
+`deploy\windows\serve.ps1` — no Windows login required. Re-copy when the session
+expires (~30 days).
+
+### Command Prompt (recommended on Windows)
+
+Command Prompt is the supported day-to-day shell for login, troubleshooting, and
+running commands. Activate the venv with **`activate.bat`**:
+
+```cmd
+cd py-bandwith-monitor
+.\.venv-eero\Scripts\activate.bat
+pip install -r requirements-eero.txt
+pip install pywin32
+python -m eero_monitor login --user you@example.com
+```
+
+`pywin32` helps Python use Windows Credential Manager reliably. Use the same venv
+Python for `login` and `serve` (`where python` / `python --version` → 3.12+).
+
+### `.env` on Windows (not `export`)
+
+Login prints bash-style `export EERO_SESSION=...` lines. In cmd, `export` does
+nothing — paste values into `.env` manually:
+
+```env
+EERO_SESSION=...
+EERO_NETWORK_ID=...
+```
+
+`deploy\windows\serve.ps1` loads `.env` automatically.
+
+### Verification and account issues
+
+| Issue | What to try |
+|-------|-------------|
+| `Verification code incorrect` | Enter the code promptly; set Windows date/time to automatic |
+| Amazon Sign-in account | Use a secondary email/password Eero admin — see [eero-api wiki](https://github.com/fulviofreitas/eero-api/wiki/Troubleshooting) |
+| Still failing after clearing creds | Copy working `.env` from Mac; paste full stderr for diagnosis |
 
 ## Security
 
